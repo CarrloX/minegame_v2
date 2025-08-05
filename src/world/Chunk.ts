@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { BlockType, getBlockProperties } from './BlockType';
-import { GreedyMesher, type MeshData } from '../meshing/GreedyMesher';
+import { BlockType } from './BlockType';
+import { GreedyMesher } from '../meshing/GreedyMesher';
 
 /**
  * Represents a 16x16x16 chunk of blocks in the world
@@ -154,21 +154,28 @@ export class Chunk {
         // Compute bounding box for frustum culling
         geometry.computeBoundingBox();
         
-        // Create a material for the chunk with texture atlas
+        // Cargar textura del atlas
         const textureLoader = new THREE.TextureLoader();
-        const texture = textureLoader.load('/assets/textures/atlas.svg');
+        const texture = textureLoader.load('/assets/textures/atlas.png');
+        
+        // Configuración óptima para texturas pixeladas
         texture.magFilter = THREE.NearestFilter;
         texture.minFilter = THREE.NearestFilter;
-        texture.anisotropy = 1; // Reducir o desactivar anisotropía para SVG
+        texture.generateMipmaps = false;
+        texture.anisotropy = 1;
+        texture.wrapS = THREE.ClampToEdgeWrapping;
+        texture.wrapT = THREE.ClampToEdgeWrapping;
+        texture.premultiplyAlpha = false;
         
-        // Enable alpha testing for transparent textures
-        const material = new THREE.MeshStandardMaterial({
+        // Usar MeshBasicMaterial para mostrar las texturas exactamente como son
+        const material = new THREE.MeshBasicMaterial({
             map: texture,
             side: THREE.FrontSide,
-            flatShading: true,
-            alphaTest: 0.5,  // Enable alpha testing for transparent textures
+            color: 0xFFFFFF, // Color base blanco puro
+            fog: false, // Desactivar niebla para mantener colores puros
+            toneMapped: false, // Desactivar mapeo de tonos para colores más brillantes
             transparent: true,
-            vertexColors: false
+            alphaTest: 0.1
         });
         
         // Create the mesh with the geometry and material
