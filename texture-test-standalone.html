@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prueba de Texturas - Minecraft Clone</title>
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background-color: #87CEEB;
+            font-family: Arial, sans-serif;
+        }
+        canvas { 
+            display: block; 
+            width: 100%; 
+            height: 100%;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background-color: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 5px;
+            max-width: 400px;
+            font-size: 14px;
+            z-index: 100;
+            pointer-events: none;
+        }
+        #controls {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            color: white;
+            background-color: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 5px;
+            z-index: 100;
+        }
+        button {
+            margin: 2px;
+            padding: 5px 10px;
+            cursor: pointer;
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            border-radius: 3px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">Cargando Three.js...</div>
+    <div id="controls" style="display: none;">
+        <button id="changeTexture">Cambiar Textura</button>
+        <button id="toggleWireframe">Mostrar Malla</button>
+    </div>
+
+    <!-- Cargar Three.js desde CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.min.js"></script>
+    
+    <script>
+        // Mostrar mensaje de estado
+        const infoDiv = document.getElementById('info');
+        const controlsDiv = document.getElementById('controls');
+        
+        // Verificar que Three.js esté cargado
+        if (!window.THREE) {
+            infoDiv.innerHTML = '<p style="color: red;">Error: No se pudo cargar Three.js. Verifica tu conexión a internet.</p>';
+            throw new Error('Three.js no se cargó correctamente');
+        }
+
+        console.log('Three.js versión:', THREE.REVISION);
+        infoDiv.textContent = 'Inicializando escena 3D...';
+        
+        // Inicializar la escena
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB);
+        
+        // Configurar cámara
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(2, 2, 2);
+        
+        // Configurar el renderizador para texturas pixeladas
+        const renderer = new THREE.WebGLRenderer({
+            antialias: false,
+            powerPreference: "high-performance",
+            preserveDrawingBuffer: true,
+            stencil: false,
+            depth: false
+        });
+        
+        // Configuración para máxima nitidez
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(1); // Fuerza el pixel ratio a 1
+        renderer.autoClear = true;
+        renderer.sortObjects = false;
+        
+        // Aplicar estilos al canvas para evitar suavizado
+        const canvas = renderer.domElement;
+        canvas.style.imageRendering = 'pixelated';
+        canvas.style.imageRendering = '-moz-crisp-edges';
+        canvas.style.imageRendering = 'crisp-edges';
+        
+        document.body.appendChild(canvas);
+        
+        // Controles de órbita
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        
+        // Configurar luces para mejor iluminación de texturas
+        const ambientLight = new THREE.AmbientLight(0xffffff, 2.0); // Aumentada intensidad
+        scene.add(ambientLight);
+        
+        // Luz principal desde el frente y arriba
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1.8);
+        directionalLight.position.set(1, 1, 1).normalize();
+        directionalLight.castShadow = false; // Desactivar sombras para mejor rendimiento
+        scene.add(directionalLight);
+        
+        // Luz de relleno desde atrás
+        const fillLight = new THREE.DirectionalLight(0xffffff, 0.6);
+        fillLight.position.set(-1, 0.5, -0.5).normalize();
+        fillLight.castShadow = false;
+        scene.add(fillLight);
+        
+        // Variables globales
+        let currentCube = null;
+        // Usar una ruta relativa desde la ubicación del HTML
+        const texturePath = 'assets/textures/atlas.png';
+        
+        // Coordenadas de textura basadas en el atlas 16x16 (x, y, width, height)
+        // Ajustadas para un atlas con origen en la esquina superior izquierda
+        const TEXTURE_COORDS = {
+    grass: { x: 0, y: 0, w: 1, h: 1 },      // Grass top: superior izquierda
+    grass_side: { x: 1, y: 0, w: 1, h: 1 }, // Grass side: superior derecha
+    dirt: { x: 0, y: 1, w: 1, h: 1 },       // Dirt: inferior izquierda
+    stone: { x: 1, y: 1, w: 1, h: 1 }       // Stone: inferior derecha
+};
+        
+        // Tamaño del atlas (en número de texturas)
+        const ATLAS_SIZE = 16; // 16x16 grid of 16x16 pixel textures
+        const TEX_SIZE = 16;   // Tamaño de cada textura en píxeles
+        
+        // Función para cargar textura
+        function loadTexture(path, callback) {
+            infoDiv.textContent = 'Cargando textura: ' + path.split('/').pop() + '...';
+            
+            const loader = new THREE.TextureLoader();
+            loader.load(
+                path,
+                function(texture) {
+                    // Configuración de textura para mantener los píxeles nítidos
+                    texture.magFilter = THREE.NearestFilter;
+                    texture.minFilter = THREE.NearestMipMapNearestFilter;
+                    texture.wrapS = THREE.ClampToEdgeWrapping;
+                    texture.wrapT = THREE.ClampToEdgeWrapping;
+                    texture.generateMipmaps = true;
+                    texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+                    
+                    // Forzar actualización de textura
+                    texture.needsUpdate = true;
+                    
+                    console.log('Textura cargada:', {
+                        width: texture.image.width,
+                        height: texture.image.height,
+                        format: texture.format,
+                        type: texture.type,
+                        path: path
+                    });
+                    
+                    callback(null, texture);
+                },
+                // onProgress
+                function(xhr) {
+                    console.log((xhr.loaded / xhr.total * 100) + '% cargado');
+                },
+                // onError
+                function(error) {
+                    console.error('Error al cargar la textura:', error);
+                    callback(error || new Error('Error al cargar la textura'));
+                }
+            );
+        }
+        
+        // Función para crear un cubo con texturas del atlas
+        function createCube(texturePath) {
+            loadTexture(texturePath, function(error, texture) {
+                if (error) {
+                    infoDiv.innerHTML = '<p style="color: red;">❌ Error: ' + (error.message || 'No se pudo cargar la textura') + '</p>';
+                    console.error('Error al cargar la textura:', error);
+                    return;
+                }
+                
+                infoDiv.innerHTML = `
+                    <p>✅ Atlas cargado: ${texturePath.split('/').pop()}</p>
+                    <p>Dimensiones: ${texture.image ? texture.image.width + 'x' + texture.image.height : 'N/A'}</p>
+                    <p>Texturas: grass, grass_side, dirt, stone</p>
+                `;
+                
+                // Mostrar controles una vez que la textura se cargó
+                controlsDiv.style.display = 'block';
+                
+                // Crear geometría y materiales para cada cara
+                const geometry = new THREE.BoxGeometry(1, 1, 1);
+                
+                // Ajuste en createMaterial
+                function createMaterial(texName) {
+                    const coords = TEXTURE_COORDS[texName];
+                    if (!coords) {
+                        console.error('Textura no encontrada:', texName);
+                        return new THREE.MeshBasicMaterial({ color: 0xff00ff }); // Rosa para errores
+                    }
+                    
+                    // Configuración para texturas pixeladas
+                    const textureClone = texture.clone();
+                    
+                    // Para un atlas 2x2, cada textura ocupa 0.5x0.5
+                    const u = coords.x * 0.5;  // 0 o 0.5
+                    const v = 0.5 - (coords.y * 0.5);  // 0.5 o 0.0 (invertir Y)
+                    
+                    // Configuración de textura para pixel art
+                    textureClone.offset.set(u, v);
+                    textureClone.repeat.set(0.5, 0.5);
+                    
+                    // Filtros para pixelado perfecto
+                    textureClone.magFilter = THREE.NearestFilter;
+                    textureClone.minFilter = THREE.NearestFilter;
+                    textureClone.generateMipmaps = false;
+                    textureClone.anisotropy = 1;
+                    textureClone.encoding = THREE.LinearEncoding; // Cambiado de sRGB a Linear
+                    textureClone.wrapS = THREE.ClampToEdgeWrapping;
+                    textureClone.wrapT = THREE.ClampToEdgeWrapping;
+                    textureClone.needsUpdate = true;
+                    
+                    // Configuración para mantener colores puros
+                    textureClone.premultiplyAlpha = false;
+                    textureClone.format = THREE.RGBAFormat;
+                    textureClone.type = THREE.UnsignedByteType;
+                    
+                    console.log(`Material ${texName}:`, {
+                        offset: textureClone.offset,
+                        repeat: textureClone.repeat,
+                        coords: coords
+                    });
+                    
+                    // Usar MeshBasicMaterial para mostrar las texturas exactamente como son
+                    // sin efectos de iluminación
+                    return new THREE.MeshBasicMaterial({
+                        map: textureClone,
+                        side: THREE.FrontSide,
+                        color: 0xFFFFFF, // Color base blanco puro
+                        fog: false, // Desactivar niebla para mantener colores puros
+                        toneMapped: false // Desactivar mapeo de tonos para colores más brillantes
+                    });
+                }
+                
+                // Crear materiales para cada cara (orden: +X, -X, +Y, -Y, +Z, -Z)
+                const materials = [
+                    createMaterial('grass_side'), // right (+X)
+                    createMaterial('grass_side'), // left (-X)
+                    createMaterial('grass'),      // top (+Y)
+                    createMaterial('dirt'),       // bottom (-Y)
+                    createMaterial('grass_side'), // front (+Z)
+                    createMaterial('grass_side')  // back (-Z)
+                ];
+                
+                // Verificar si alguna textura falló al cargar
+                const hasError = materials.some(m => m.wireframe);
+                if (hasError) {
+                    infoDiv.innerHTML += '<p style="color: orange;">⚠ Algunas texturas no se cargaron correctamente. Verifica la consola para más detalles.</p>';
+                }
+                
+                // Crear geometría del cubo con materiales por cara
+                const cube = new THREE.Mesh(
+                    new THREE.BoxGeometry(1, 1, 1),
+                    materials
+                );
+                
+                // Añadir ejes de referencia
+                const axesHelper = new THREE.AxesHelper(2);
+                scene.add(axesHelper);
+                
+                console.log('Textura cargada:', texture);
+                
+                // Eliminar cubo anterior si existe
+                if (currentCube) {
+                    scene.remove(currentCube);
+                    currentCube.geometry.dispose();
+                    
+                    // Manejar tanto materiales individuales como arrays de materiales
+                    if (Array.isArray(currentCube.material)) {
+                        // Si es un array de materiales, liberar cada uno
+                        currentCube.material.forEach(material => {
+                            material.dispose();
+                            // Liberar también la textura si existe
+                            if (material.map) material.map.dispose();
+                        });
+                    } else if (currentCube.material) {
+                        // Si es un solo material
+                        currentCube.material.dispose();
+                        // Liberar también la textura si existe
+                        if (currentCube.material.map) currentCube.material.map.dispose();
+                    }
+                }
+                
+                // Añadir nuevo cubo a la escena
+                scene.add(cube);
+                currentCube = cube;
+                
+                // Añadir ejes de referencia
+                addAxesHelper();
+            });
+        }
+        
+        // Función para añadir ejes de referencia
+        function addAxesHelper() {
+            // Eliminar ayudantes anteriores
+            scene.children = scene.children.filter(function(child) {
+                return !(child instanceof THREE.AxesHelper);
+            });
+            
+            // Añadir ejes de referencia
+            const axesHelper = new THREE.AxesHelper(2);
+            scene.add(axesHelper);
+        }
+        
+        // Función para alternar la visualización de la malla
+        function toggleWireframe() {
+            if (currentCube) {
+                // Manejar tanto materiales simples como arrays de materiales
+                const materials = Array.isArray(currentCube.material) 
+                    ? currentCube.material 
+                    : [currentCube.material];
+                
+                materials.forEach(mat => {
+                    if (mat) {
+                        mat.wireframe = !mat.wireframe;
+                        mat.needsUpdate = true;
+                    }
+                });
+            }
+        }
+        
+        // Función para recargar la textura
+        function reloadTexture() {
+            createCube(texturePath + '?t=' + Date.now());
+        }
+        
+        // Configurar controles de la interfaz
+        document.getElementById('toggleWireframe').addEventListener('click', toggleWireframe);
+        document.getElementById('changeTexture').addEventListener('click', reloadTexture);
+        
+        // Manejar redimensionamiento de la ventana
+        window.addEventListener('resize', function() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+        
+        // Función de animación
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // Rotar el cubo si existe
+            if (currentCube) {
+                currentCube.rotation.x += 0.005;
+                currentCube.rotation.y += 0.01;
+            }
+            
+            // Actualizar controles
+            controls.update();
+            
+            // Renderizar la escena
+            renderer.render(scene, camera);
+        }
+        
+        // Iniciar la aplicación
+        infoDiv.textContent = 'Iniciando prueba de texturas...';
+        createCube(texturePath);
+        animate();
+        
+        console.log('Prueba de texturas iniciada. Usa los controles en la esquina inferior izquierda.');
+    </script>
+</body>
+</html>

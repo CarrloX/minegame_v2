@@ -1,0 +1,27 @@
+/* Reset default margins and padding */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+/* Make the HTML and body take up full viewport */
+html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden; /* Prevent scrollbars */
+}
+
+/* Make the canvas take up full viewport */
+canvas {
+    display: block; /* Remove any extra space below the canvas */
+    width: 100%;
+    height: 100%;
+}
+
+/* Ensure the app container takes full viewport */
+#app {
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden; /* Prevent scrollbars */
+}
