@@ -70,11 +70,27 @@
         camera.position.set(16, 24, 32);
         camera.lookAt(8, 8, 8);
         
-        const renderer = new THREE.WebGLRenderer({ antialias: false });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(window.devicePixelRatio);
+        // Configuración del renderizador para texturas pixel perfect
+        const renderer = new THREE.WebGLRenderer({
+            antialias: false,
+            powerPreference: "high-performance",
+            precision: 'lowp',
+            alpha: false,
+            stencil: false,
+            depth: true,
+            premultipliedAlpha: false
+        });
+        
+        // Configuración de píxeles para renderizado nítido
+        renderer.setPixelRatio(1); // Forzar a 1 para evitar escalado
+        renderer.setSize(window.innerWidth, window.innerHeight, false);
         renderer.toneMapping = THREE.NoToneMapping;
-        renderer.outputEncoding = THREE.sRGBEncoding;
+        renderer.outputEncoding = THREE.LinearEncoding;
+        
+        // Configuración CSS para el canvas
+        const canvas = renderer.domElement;
+        canvas.style.imageRendering = 'pixelated';
+        canvas.style.msInterpolationMode = 'nearest-neighbor';
         document.body.appendChild(renderer.domElement);
         
         const controls = new THREE.OrbitControls(camera, renderer.domElement);
@@ -118,13 +134,24 @@
             loader.load(
                 path,
                 function(texture) {
+                    // Configuración para texturas pixel perfect
                     texture.magFilter = THREE.NearestFilter;
-                    texture.minFilter = THREE.NearestMipMapNearestFilter;
+                    texture.minFilter = THREE.NearestFilter; // Sin mipmaps para mejor nitidez
                     texture.wrapS = THREE.ClampToEdgeWrapping;
                     texture.wrapT = THREE.ClampToEdgeWrapping;
-                    texture.generateMipmaps = true;
-                    texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+                    texture.generateMipmaps = false; // Desactivar mipmaps
+                    texture.anisotropy = 1; // Sin anisotropía
+                    texture.encoding = THREE.LinearEncoding;
+                    texture.format = THREE.RGBAFormat;
+                    texture.type = THREE.UnsignedByteType;
+                    texture.flipY = true; // Volver a habilitar el volteo vertical
+                    texture.unpackAlignment = 1;
                     texture.needsUpdate = true;
+                    
+                    // Configuración avanzada del contexto WebGL
+                    const gl = renderer.getContext();
+                    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+                    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true); // Habilitar volteo vertical en WebGL
                     console.log('Textura cargada:', {
                         width: texture.image.width,
                         height: texture.image.height,
