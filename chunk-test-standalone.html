@@ -63,16 +63,13 @@
     <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/controls/OrbitControls.js"></script>
     <script>
-        // Configuración de la escena
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x87CEEB);
         
-        // Configuración de la cámara
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         camera.position.set(16, 24, 32);
         camera.lookAt(8, 8, 8);
         
-        // Configuración del renderizador
         const renderer = new THREE.WebGLRenderer({ antialias: false });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(window.devicePixelRatio);
@@ -80,7 +77,6 @@
         renderer.outputEncoding = THREE.sRGBEncoding;
         document.body.appendChild(renderer.domElement);
         
-        // Controles de órbita
         const controls = new THREE.OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
         controls.dampingFactor = 0.05;
@@ -89,7 +85,6 @@
         controls.maxDistance = 100;
         controls.maxPolarAngle = Math.PI / 2;
         
-        // Añadir luces (aunque usamos MeshBasicMaterial, pueden ser útiles para debug)
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
         scene.add(ambientLight);
         
@@ -97,56 +92,39 @@
         directionalLight.position.set(1, 1, 1);
         scene.add(directionalLight);
         
-        // Crear un helper de ejes
         const axesHelper = new THREE.AxesHelper(16);
         scene.add(axesHelper);
         
-        // Crear una rejilla para mejor orientación
         const gridHelper = new THREE.GridHelper(32, 32, 0x888888, 0x444444);
         scene.add(gridHelper);
         
-        // Variable para almacenar el chunk
         let chunkMesh = null;
         
-        // Coordenadas de textura basadas en el atlas 2x2 (x, y, w, h)
-        // Coordenadas normalizadas para un atlas 2x2 (0-1)
         const TEXTURE_COORDS = {
-            // grass_top: textura de la parte superior de la hierba
             grass: { x: 0, y: 0, w: 1, h: 1 },
-            // grass_side: textura lateral de la hierba (tierra con hierba arriba)
             grass_side: { x: 1, y: 0, w: 1, h: 1 },
-            // dirt: textura de tierra (para lados inferiores de la hierba y bloques de tierra)
             dirt: { x: 0, y: 1, w: 1, h: 1 },
-            // stone: textura de piedra
             stone: { x: 1, y: 1, w: 1, h: 1 }
         };
         
-        // Tamaño del atlas (en número de texturas)
-        const ATLAS_SIZE = 2; // 2x2 grid de texturas
-        const TEX_SIZE = 16;  // Tamaño de cada textura en píxeles
+        const ATLAS_SIZE = 2;
+        const TEX_SIZE = 16;
         
-        // Ruta a la textura del atlas
         const texturePath = 'public/assets/textures/atlas.png';
         
-        // Función para cargar textura
         function loadTexture(path, callback) {
             console.log('Cargando textura:', path);
-            
             const loader = new THREE.TextureLoader();
             loader.load(
                 path,
                 function(texture) {
-                    // Configuración de textura para mantener los píxeles nítidos
                     texture.magFilter = THREE.NearestFilter;
                     texture.minFilter = THREE.NearestMipMapNearestFilter;
                     texture.wrapS = THREE.ClampToEdgeWrapping;
                     texture.wrapT = THREE.ClampToEdgeWrapping;
                     texture.generateMipmaps = true;
                     texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
-                    
-                    // Forzar actualización de textura
                     texture.needsUpdate = true;
-                    
                     console.log('Textura cargada:', {
                         width: texture.image.width,
                         height: texture.image.height,
@@ -154,14 +132,11 @@
                         type: texture.type,
                         path: path
                     });
-                    
                     callback(null, texture);
                 },
-                // onProgress
                 function(xhr) {
                     console.log((xhr.loaded / xhr.total * 100) + '% cargado');
                 },
-                // onError
                 function(error) {
                     console.error('Error al cargar la textura:', error);
                     callback(error || new Error('Error al cargar la textura'));
@@ -169,7 +144,6 @@
             );
         }
         
-        // Función para crear un material con la textura cargada
         function createChunkMaterial(texture) {
             return new THREE.MeshBasicMaterial({
                 map: texture,
@@ -183,44 +157,36 @@
             });
         }
         
-        // Función para obtener coordenadas UV normalizadas para una textura en el atlas
         function getUvCoords(texName, face) {
-            // Determinar qué textura usar basado en el tipo de bloque y la cara
             let texKey = texName.toLowerCase();
             
-            // Para bloques de hierba, usar textura lateral en los lados y textura de hierba solo arriba
             if (texName === 'grass') {
                 if (face === 'top') {
-                    texKey = 'grass'; // Usar textura de hierba en la parte superior
+                    texKey = 'grass';
                 } else if (face === 'bottom') {
-                    texKey = 'dirt';  // Usar textura de tierra en la parte inferior
+                    texKey = 'dirt';
                 } else {
-                    texKey = 'grass_side'; // Usar textura lateral de hierba
+                    texKey = 'grass_side';
                 }
             }
             
             const coords = TEXTURE_COORDS[texKey] || TEXTURE_COORDS.stone;
             
-            // Normalizar coordenadas al rango [0,1]
             const cellSize = 1 / ATLAS_SIZE;
             const x = coords.x * cellSize;
-            const y = 1 - (coords.y + 1) * cellSize; // Invertir Y para que 0 esté abajo
+            const y = 1 - (coords.y + 1) * cellSize;
             const w = cellSize * coords.w;
             const h = cellSize * coords.h;
             
-            // Coordenadas de los vértices en sentido horario comenzando desde la esquina superior izquierda
-            // Ajustar el orden para que coincida con la geometría de Three.js
             return [
-                [x, y + h],         // superior izquierda
-                [x + w, y + h],     // superior derecha
+                [x, y],             // inferior izquierda (tierra)
                 [x + w, y],         // inferior derecha
-                [x, y]              // inferior izquierda
+                [x + w, y + h],     // superior derecha (hierba)
+                [x, y + h]          // superior izquierda
             ];
         }
         
-        // Crear un chunk de prueba manualmente
         function createTestChunk() {
-            // Primero cargamos la textura
             return new Promise((resolve, reject) => {
                 loadTexture(texturePath, function(error, texture) {
                     if (error) {
@@ -229,152 +195,125 @@
                         return;
                     }
                     
-                    // Crear material con la textura cargada
                     const material = createChunkMaterial(texture);
-                    
-                    // Crear geometría para el chunk
                     const geometry = new THREE.BufferGeometry();
                     
-                    // Arrays para almacenar los vértices, normales, UVs e índices
                     const positions = [];
                     const normals = [];
                     const uvs = [];
                     const indices = [];
                     
-                    // Tamaño del chunk
                     const CHUNK_SIZE = 16;
                     const CHUNK_HEIGHT = 16;
                     
-                    // Función para añadir una cara al chunk con texturas correctas
                     function addFace(vertices, normal, blockType, faceType = 'side') {
                         const vertexCount = positions.length / 3;
                         
-                        // Añadir vértices
                         for (let i = 0; i < vertices.length; i += 3) {
                             positions.push(vertices[i], vertices[i+1], vertices[i+2]);
                             normals.push(normal[0], normal[1], normal[2]);
                         }
                         
-                        // Obtener coordenadas UV según el tipo de bloque y cara
                         const uvCoords = getUvCoords(blockType, faceType);
                         
-                        // Añadir UVs
-                        for (let i = 0; i < 4; i++) {
+                        for (let i = 0; 4 > i; i++) {
                             uvs.push(uvCoords[i][0], uvCoords[i][1]);
                         }
                         
-                        // Añadir índices para dos triángulos que forman un cuadrado
                         indices.push(
                             vertexCount, vertexCount + 1, vertexCount + 2,
                             vertexCount, vertexCount + 2, vertexCount + 3
                         );
                     }
             
-                    // Generar un chunk de prueba con diferentes tipos de bloques
                     for (let x = 0; x < CHUNK_SIZE; x++) {
-                for (let z = 0; z < CHUNK_SIZE; z++) {
-                    // Altura del terreno (ondulaciones simples)
-                    const height = Math.floor(
-                        4 + Math.sin(x * 0.5) * 2 + Math.cos(z * 0.5) * 2
-                    );
-                    
-                    // Colocar bloques desde la base hasta la altura calculada
-                    for (let y = 0; y < CHUNK_HEIGHT; y++) {
-                        if (y <= height) {
-                                // Determinar el tipo de bloque en esta posición
-                            let blockType;
-                            if (y === height) {
-                                blockType = 'grass'; // Usar minúsculas para coincidir con TEXTURE_COORDS
-                            } else if (y > height - 3) {
-                                blockType = 'dirt';
-                            } else {
-                                blockType = 'stone';
+                        for (let z = 0; z < CHUNK_SIZE; z++) {
+                            const height = Math.floor(
+                                4 + Math.sin(x * 0.5) * 2 + Math.cos(z * 0.5) * 2
+                            );
+                            
+                            for (let y = 0; y < CHUNK_HEIGHT; y++) {
+                                if (y <= height) {
+                                    let blockType;
+                                    if (y === height) {
+                                        blockType = 'grass';
+                                    } else if (y > height - 3) {
+                                        blockType = 'dirt';
+                                    } else {
+                                        blockType = 'stone';
+                                    }
+                                    
+                                    const px = x;
+                                    const py = y;
+                                    const pz = z;
+                                    
+                                    // Front (z+, sur): inferior izquierda -> inferior derecha -> superior derecha -> superior izquierda
+                                    addFace(
+                                        [px, py, pz+1, px+1, py, pz+1, px+1, py+1, pz+1, px, py+1, pz+1],
+                                        [0, 0, 1],
+                                        blockType,
+                                        'front'
+                                    );
+                                    
+                                    // Back (z-, norte): inferior izquierda -> inferior derecha -> superior derecha -> superior izquierda
+                                    addFace(
+                                        [px+1, py, pz, px, py, pz, px, py+1, pz, px+1, py+1, pz],
+                                        [0, 0, -1],
+                                        blockType,
+                                        'back'
+                                    );
+                                    
+                                    // Right (x+, este): inferior izquierda -> inferior derecha -> superior derecha -> superior izquierda
+                                    addFace(
+                                        [px+1, py, pz+1, px+1, py, pz, px+1, py+1, pz, px+1, py+1, pz+1],
+                                        [1, 0, 0],
+                                        blockType,
+                                        'right'
+                                    );
+                                    
+                                    // Left (x-, oeste): inferior izquierda -> inferior derecha -> superior derecha -> superior izquierda
+                                    addFace(
+                                        [px, py, pz, px, py, pz+1, px, py+1, pz+1, px, py+1, pz],
+                                        [-1, 0, 0],
+                                        blockType,
+                                        'left'
+                                    );
+                                    
+                                    // Top (y+): sin cambios
+                                    addFace(
+                                        [px, py+1, pz, px, py+1, pz+1, px+1, py+1, pz+1, px+1, py+1, pz],
+                                        [0, 1, 0],
+                                        blockType,
+                                        'top'
+                                    );
+                                    
+                                    // Bottom (y-): sin cambios
+                                    addFace(
+                                        [px, py, pz, px+1, py, pz, px+1, py, pz+1, px, py, pz+1],
+                                        [0, -1, 0],
+                                        blockType,
+                                        'bottom'
+                                    );
+                                }
                             }
-                            
-                            // Añadir las caras visibles del bloque
-                            // (en una implementación real, verificaríamos los bloques adyacentes)
-                            
-                            // Coordenadas del bloque
-                            const px = x;
-                            const py = y;
-                            const pz = z;
-                            
-                            // Añadir caras con las texturas correctas
-                            // Cara frontal (z+)
-                            addFace(
-                                [px, py, pz+1, px+1, py, pz+1, px+1, py+1, pz+1, px, py+1, pz+1],
-                                [0, 0, 1],
-                                blockType,
-                                'front' // Usar 'front' para identificar la cara frontal
-                            );
-                            
-                            // Cara trasera (z-)
-                            addFace(
-                                [px, py, pz, px, py+1, pz, px+1, py+1, pz, px+1, py, pz],
-                                [0, 0, -1],
-                                blockType,
-                                'back' // Usar 'back' para identificar la cara trasera
-                            );
-                            
-                            // Cara derecha (x+)
-                            addFace(
-                                [px+1, py, pz, px+1, py+1, pz, px+1, py+1, pz+1, px+1, py, pz+1],
-                                [1, 0, 0],
-                                blockType,
-                                'right' // Usar 'right' para identificar la cara derecha
-                            );
-                            
-                            // Cara izquierda (x-)
-                            addFace(
-                                [px, py, pz, px, py, pz+1, px, py+1, pz+1, px, py+1, pz],
-                                [-1, 0, 0],
-                                blockType,
-                                'left' // Usar 'left' para identificar la cara izquierda
-                            );
-                            
-                            // Cara superior (y+)
-                            addFace(
-                                [px, py+1, pz, px, py+1, pz+1, px+1, py+1, pz+1, px+1, py+1, pz],
-                                [0, 1, 0],
-                                blockType,
-                                'top' // Usar 'top' para identificar la cara superior
-                            );
-                            
-                            // Cara inferior (y-)
-                            addFace(
-                                [px, py, pz, px+1, py, pz, px+1, py, pz+1, px, py, pz+1],
-                                [0, -1, 0],
-                                blockType,
-                                'bottom' // Usar 'bottom' para identificar la cara inferior
-                            );
                         }
                     }
-                }
-            }
-            
-                    // Configurar la geometría con los datos generados
+                    
                     geometry.setIndex(indices);
                     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
                     geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
                     geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
                     geometry.computeBoundingSphere();
                     
-                    // Crear el mesh del chunk
                     const chunk = new THREE.Mesh(geometry, material);
-                    
-                    // Ajustar la posición para centrar el chunk
                     chunk.position.set(-CHUNK_SIZE/2, 0, -CHUNK_SIZE/2);
-                    
-                    // Marcar como actualizado
                     resolve(chunk);
                 });
             });
         }
         
-        // Variables para el modo wireframe
         let wireframeMode = false;
         
-        // Crear y añadir el chunk a la escena
         createTestChunk()
             .then(chunk => {
                 chunkMesh = chunk;
@@ -387,7 +326,6 @@
                     '<p style="color: red;">Error al crear el chunk: ' + error.message + '</p>';
             });
         
-        // Configurar controles de la interfaz
         document.getElementById('toggleWireframe').addEventListener('click', () => {
             wireframeMode = !wireframeMode;
             if (chunkMesh) {
@@ -401,21 +339,18 @@
             controls.update();
         });
         
-        // Manejar redimensionamiento de la ventana
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         });
         
-        // Función de animación
         function animate() {
             requestAnimationFrame(animate);
             controls.update();
             renderer.render(scene, camera);
         }
         
-        // Iniciar la animación
         animate();
     </script>
 </body>
