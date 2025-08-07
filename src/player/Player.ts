@@ -29,9 +29,12 @@ export class Player {
     private sprint = false;
     
     // Movement parameters
-    private readonly MOVE_SPEED = 5.0;
-    private readonly SPRINT_MULTIPLIER = 2.0;
-    private readonly MOUSE_SENSITIVITY = 0.002;
+    private readonly MOVE_SPEED = 4.3; // Bloques por segundo
+    private readonly SPRINT_MULTIPLIER = 1.3; // Ajustado para ser más sutil
+    private readonly MOUSE_SENSITIVITY = 0.0015; // Sensibilidad del mouse reducida
+    private readonly GRAVITY = 30.0; // Gravedad
+    private readonly JUMP_FORCE = 7.0; // Fuerza de salto
+    private isOnGround = false; // Si el jugador está en el suelo
     
     // Rotation
     private yaw = -Math.PI / 2; // Y-axis rotation (left/right)
@@ -85,25 +88,28 @@ export class Player {
         const key = event.key.toLowerCase();
         this.keysPressed.add(key);
 
-        switch (key) {
-            case MOVEMENT_KEYS.FORWARD:
-                this.moveForward = true;
-                break;
-            case MOVEMENT_KEYS.BACKWARD:
-                this.moveBackward = true;
-                break;
-            case MOVEMENT_KEYS.LEFT:
-                this.moveLeft = true;
-                break;
-            case MOVEMENT_KEYS.RIGHT:
-                this.moveRight = true;
-                break;
-            case MOVEMENT_KEYS.JUMP:
-                this.moveUp = true;
-                break;
-            case MOVEMENT_KEYS.SPRINT:
-                this.sprint = true;
-                break;
+        // Solo cambiar el estado si la tecla no estaba ya presionada
+        if (!event.repeat) {
+            switch (key) {
+                case MOVEMENT_KEYS.FORWARD:
+                    this.moveForward = true;
+                    break;
+                case MOVEMENT_KEYS.BACKWARD:
+                    this.moveBackward = true;
+                    break;
+                case MOVEMENT_KEYS.LEFT:
+                    this.moveLeft = true;
+                    break;
+                case MOVEMENT_KEYS.RIGHT:
+                    this.moveRight = true;
+                    break;
+                case MOVEMENT_KEYS.JUMP:
+                    this.moveUp = true;
+                    break;
+                case MOVEMENT_KEYS.SPRINT:
+                    this.sprint = true;
+                    break;
+            }
         }
     }
 
@@ -136,19 +142,19 @@ export class Player {
     private onMouseMove(event: MouseEvent): void {
         if (!this.isMouseLocked) return;
 
-        const movementX = event.movementX || (event as any).mozMovementX || 0;
-        const movementY = event.movementY || (event as any).mozMovementY || 0;
+        // Obtener el movimiento del mouse con compatibilidad entre navegadores
+        const movementX = event.movementX || (event as any).mozMovementX || (event as any).webkitMovementX || 0;
+        const movementY = event.movementY || (event as any).mozMovementY || (event as any).webkitMovementY || 0;
 
-        // Update yaw and pitch based on mouse movement
-        // Invert Y-axis for more intuitive mouse movement
+        // Actualizar rotación horizontal (izquierda/derecha)
         this.yaw -= movementX * this.MOUSE_SENSITIVITY;
-        this.pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.pitch + movementY * this.MOUSE_SENSITIVITY));
-
-        // Update camera rotation
-        this.updateCameraRotation();
         
-        // Debug: Log current rotation
-        // console.log(`Yaw: ${(this.yaw * 180 / Math.PI).toFixed(1)}°, Pitch: ${(this.pitch * 180 / Math.PI).toFixed(1)}°`);
+        // Actualizar rotación vertical (arriba/abajo) con límites para evitar volteretas
+        this.pitch = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, 
+            this.pitch - movementY * this.MOUSE_SENSITIVITY));
+
+        // Actualizar la rotación de la cámara
+        this.updateCameraRotation();
     }
 
     private onPointerLockChange(): void {
@@ -156,25 +162,24 @@ export class Player {
     }
 
     private updateCameraRotation(): void {
-        // Calculate new direction vector from yaw and pitch
-        this.direction.x = Math.cos(this.pitch) * Math.cos(this.yaw);
+        // Calcular el vector de dirección basado en los ángulos de rotación
+        this.direction.x = Math.cos(this.pitch) * Math.sin(this.yaw);
         this.direction.y = Math.sin(this.pitch);
-        this.direction.z = Math.cos(this.pitch) * Math.sin(this.yaw);
+        this.direction.z = Math.cos(this.pitch) * Math.cos(this.yaw);
         this.direction.normalize();
 
-        // Update camera rotation
+        // Actualizar la rotación de la cámara
         this.camera.rotation.x = -this.pitch;
         this.camera.rotation.y = -this.yaw;
+        this.camera.rotation.z = 0; // Evitar inclinación lateral
     }
 
     public update(deltaTime: number): void {
-        // Calculate movement speed
-        const speed = (this.sprint ? this.SPRINT_MULTIPLIER : 1.0) * this.MOVE_SPEED * deltaTime;
+        // Calcular velocidad de movimiento base
+        const moveSpeed = this.MOVE_SPEED * (this.sprint ? this.SPRINT_MULTIPLIER : 1.0);
+        const actualSpeed = moveSpeed * deltaTime;
         
-        // Reset velocity
-        this.velocity.set(0, 0, 0);
-
-        // Calculate movement direction based on camera orientation
+        // Calcular direcciones de movimiento basadas en la orientación de la cámara
         const forward = new THREE.Vector3(
             Math.sin(this.yaw),
             0,
@@ -187,16 +192,48 @@ export class Player {
             Math.cos(this.yaw + Math.PI / 2)
         ).normalize();
 
-        // Apply movement based on key states
-        if (this.moveForward) this.velocity.add(forward.multiplyScalar(speed));
-        if (this.moveBackward) this.velocity.sub(forward.multiplyScalar(speed));
-        if (this.moveLeft) this.velocity.sub(right.multiplyScalar(speed));
-        if (this.moveRight) this.velocity.add(right.multiplyScalar(speed));
-        if (this.moveUp) this.velocity.y += speed;
-        if (!this.moveUp && !this.moveDown) this.velocity.y = 0;
-
-        // Update position
-        this.position.add(this.velocity);
+        // Aplicar movimiento horizontal
+        const moveX = (this.moveRight ? 1 : 0) - (this.moveLeft ? 1 : 0);
+        const moveZ = (this.moveForward ? 1 : 0) - (this.moveBackward ? 1 : 0);
+        
+        // Calcular velocidad horizontal
+        const moveDirection = new THREE.Vector3();
+        if (moveZ !== 0) moveDirection.add(forward.multiplyScalar(moveZ));
+        if (moveX !== 0) moveDirection.add(right.multiplyScalar(moveX));
+        
+        // Normalizar para movimiento diagonal
+        if (moveX !== 0 && moveZ !== 0) {
+            moveDirection.normalize();
+        }
+        
+        // Aplicar velocidad horizontal
+        this.velocity.x = moveDirection.x * actualSpeed;
+        this.velocity.z = moveDirection.z * actualSpeed;
+        
+        // Aplicar gravedad
+        this.velocity.y -= this.GRAVITY * deltaTime;
+        
+        // Manejar salto
+        if (this.moveUp && this.isOnGround) {
+            this.velocity.y = this.JUMP_FORCE;
+            this.isOnGround = false;
+        }
+        
+        // Actualizar posición
+        this.position.x += this.velocity.x;
+        this.position.z += this.velocity.z;
+        
+        // Aplicar gravedad y movimiento vertical
+        this.position.y += this.velocity.y * deltaTime;
+        
+        // Detección básica de suelo (simplificada)
+        if (this.position.y <= 0) {
+            this.position.y = 0;
+            this.velocity.y = 0;
+            this.isOnGround = true;
+        } else {
+            this.isOnGround = false;
+        }
         
         // Update camera position
         this.camera.position.copy(this.position);

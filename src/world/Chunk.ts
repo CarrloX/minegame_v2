@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { BlockType } from './BlockType';
-import { GreedyMesher } from '../meshing/GreedyMesher';
 
 /**
  * Represents a 16x16x16 chunk of blocks in the world
@@ -99,7 +98,7 @@ export class Chunk {
     }
     
     /**
-     * Updates the chunk's mesh based on its block data using Greedy Meshing
+     * Updates the chunk's mesh based on its block data using simple face culling
      */
     private updateMesh(): void {
         // Dispose of the old mesh if it exists
@@ -121,74 +120,226 @@ export class Chunk {
             return;
         }
         
-        // Convert chunk data to 3D array format expected by GreedyMesher
-        const blocks: number[][][] = [];
+        const positions: number[] = [];
+        const normals: number[] = [];
+        const uvs: number[] = [];
+        const indices: number[] = [];
         
+        // Coordenadas de textura para los diferentes tipos de bloques
+        const TEXTURE_COORDS = {
+            [BlockType.GRASS]: { x: 0, y: 0, w: 1, h: 1 },
+            [BlockType.DIRT]: { x: 0, y: 1, w: 1, h: 1 },
+            [BlockType.STONE]: { x: 1, y: 1, w: 1, h: 1 },
+            [BlockType.GRASS_SIDE]: { x: 1, y: 0, w: 1, h: 1 }
+        };
+        
+        // Función para obtener coordenadas UV basadas en el tipo de bloque y la cara
+        const getUvCoords = (blockType: BlockType, face: string) => {
+            let texKey = blockType;
+            
+            if (blockType === BlockType.GRASS) {
+                if (face === 'top') {
+                    texKey = BlockType.GRASS;
+                } else if (face === 'bottom') {
+                    texKey = BlockType.DIRT;
+                } else {
+                    texKey = BlockType.GRASS_SIDE;
+                }
+            }
+            
+            const coords = TEXTURE_COORDS[texKey] || TEXTURE_COORDS[BlockType.STONE];
+            const cellSize = 1 / 2; // Tamaño de cada textura en el atlas (2x2)
+            
+            const x = coords.x * cellSize;
+            const y = 1 - (coords.y + 1) * cellSize;
+            const w = cellSize * coords.w;
+            const h = cellSize * coords.h;
+            
+            return [
+                [x, y],             // inferior izquierda
+                [x + w, y],         // inferior derecha
+                [x + w, y + h],     // superior derecha
+                [x, y + h]          // superior izquierda
+            ];
+        };
+        
+        // Función para agregar una cara al mesh
+        const addFace = (vertices: number[], normal: number[], blockType: BlockType, face: string) => {
+            const vertexCount = positions.length / 3;
+            
+            // Agregar vértices
+            for (let i = 0; i < vertices.length; i += 3) {
+                positions.push(vertices[i], vertices[i+1], vertices[i+2]);
+                normals.push(normal[0], normal[1], normal[2]);
+            }
+            
+            // Obtener coordenadas UV
+            const uvCoords = getUvCoords(blockType, face);
+            
+            // Agregar coordenadas UV
+            for (let i = 0; i < 4; i++) {
+                uvs.push(uvCoords[i][0], uvCoords[i][1]);
+            }
+            
+            // Agregar índices (dos triángulos por cara)
+            indices.push(
+                vertexCount, vertexCount + 1, vertexCount + 2,
+                vertexCount, vertexCount + 2, vertexCount + 3
+            );
+        };
+        
+        // Verificar si un bloque está oculto (rodeado por bloques en todas las direcciones)
+        const isBlockHidden = (x: number, y: number, z: number): boolean => {
+            // Si está en el borde, siempre es visible
+            if (x === 0 || x === Chunk.SIZE - 1 || 
+                y === 0 || y === Chunk.HEIGHT - 1 || 
+                z === 0 || z === Chunk.SIZE - 1) {
+                return false;
+            }
+            
+            // Verificar los 6 vecinos
+            return this.getBlock(x+1, y, z) !== BlockType.AIR &&
+                   this.getBlock(x-1, y, z) !== BlockType.AIR &&
+                   this.getBlock(x, y+1, z) !== BlockType.AIR &&
+                   this.getBlock(x, y-1, z) !== BlockType.AIR &&
+                   this.getBlock(x, y, z+1) !== BlockType.AIR &&
+                   this.getBlock(x, y, z-1) !== BlockType.AIR;
+        };
+        
+        // Generar geometría para cada bloque
         for (let x = 0; x < Chunk.SIZE; x++) {
-            blocks[x] = [];
-            for (let y = 0; y < Chunk.HEIGHT; y++) {
-                blocks[x][y] = [];
-                for (let z = 0; z < Chunk.SIZE; z++) {
-                    blocks[x][y][z] = this.getBlock(x, y, z);
+            for (let z = 0; z < Chunk.SIZE; z++) {
+                for (let y = 0; y < Chunk.HEIGHT; y++) {
+                    const blockType = this.getBlock(x, y, z);
+                    
+                    // Saltar bloques de aire
+                    if (blockType === BlockType.AIR) continue;
+                    
+                    // Saltar bloques completamente rodeados (opcional para optimización)
+                    if (isBlockHidden(x, y, z)) continue;
+                    
+                    // Verificar caras visibles y agregar geometría
+                    const px = x;
+                    const py = y;
+                    const pz = z;
+                    
+                    // Verificar cada cara y agregarla si es visible
+                    
+                    // Front face (z+)
+                    if (z === Chunk.SIZE - 1 || this.getBlock(x, y, z+1) === BlockType.AIR) {
+                        addFace(
+                            [px, py, pz+1, px+1, py, pz+1, px+1, py+1, pz+1, px, py+1, pz+1],
+                            [0, 0, 1],
+                            blockType,
+                            'front'
+                        );
+                    }
+                    
+                    // Back face (z-)
+                    if (z === 0 || this.getBlock(x, y, z-1) === BlockType.AIR) {
+                        addFace(
+                            [px+1, py, pz, px, py, pz, px, py+1, pz, px+1, py+1, pz],
+                            [0, 0, -1],
+                            blockType,
+                            'back'
+                        );
+                    }
+                    
+                    // Right face (x+)
+                    if (x === Chunk.SIZE - 1 || this.getBlock(x+1, y, z) === BlockType.AIR) {
+                        addFace(
+                            [px+1, py, pz+1, px+1, py, pz, px+1, py+1, pz, px+1, py+1, pz+1],
+                            [1, 0, 0],
+                            blockType,
+                            'right'
+                        );
+                    }
+                    
+                    // Left face (x-)
+                    if (x === 0 || this.getBlock(x-1, y, z) === BlockType.AIR) {
+                        addFace(
+                            [px, py, pz, px, py, pz+1, px, py+1, pz+1, px, py+1, pz],
+                            [-1, 0, 0],
+                            blockType,
+                            'left'
+                        );
+                    }
+                    
+                    // Top face (y+)
+                    if (y === Chunk.HEIGHT - 1 || this.getBlock(x, y+1, z) === BlockType.AIR) {
+                        addFace(
+                            [px, py+1, pz, px, py+1, pz+1, px+1, py+1, pz+1, px+1, py+1, pz],
+                            [0, 1, 0],
+                            blockType,
+                            'top'
+                        );
+                    }
+                    
+                    // Bottom face (y-)
+                    if (y === 0 || this.getBlock(x, y-1, z) === BlockType.AIR) {
+                        addFace(
+                            [px, py, pz, px+1, py, pz, px+1, py, pz+1, px, py, pz+1],
+                            [0, -1, 0],
+                            blockType,
+                            'bottom'
+                        );
+                    }
                 }
             }
         }
         
-        // Generate optimized mesh data using GreedyMesher
-        const meshData = GreedyMesher.generateMesh(blocks);
-        
-        // Create a new geometry
+        // Crear la geometría final
         const geometry = new THREE.BufferGeometry();
         
-        // Set up the geometry with the computed attributes
-        geometry.setAttribute('position', new THREE.Float32BufferAttribute(meshData.positions, 3));
-        geometry.setAttribute('normal', new THREE.Float32BufferAttribute(meshData.normals, 3));
-        geometry.setAttribute('uv', new THREE.Float32BufferAttribute(meshData.uvs, 2));
-        geometry.setIndex(meshData.indices);
-        
-        // Compute normals if needed (shouldn't be necessary as we provide them, but just in case)
-        if (meshData.normals.length === 0) {
-            geometry.computeVertexNormals();
+        // Configurar atributos
+        if (positions.length > 0) {
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+            geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+            geometry.setIndex(indices);
+            
+            // Calcular bounding box para frustum culling
+            geometry.computeBoundingBox();
+            
+            // Cargar textura del atlas
+            const textureLoader = new THREE.TextureLoader();
+            const texture = textureLoader.load('/assets/textures/atlas.png');
+            
+            // Configuración óptima para texturas pixeladas
+            texture.magFilter = THREE.NearestFilter;
+            texture.minFilter = THREE.NearestFilter;
+            texture.generateMipmaps = false;
+            texture.anisotropy = 1;
+            texture.wrapS = THREE.ClampToEdgeWrapping;
+            texture.wrapT = THREE.ClampToEdgeWrapping;
+            texture.premultiplyAlpha = false;
+            
+            // Material para el chunk
+            const material = new THREE.MeshBasicMaterial({
+                map: texture,
+                side: THREE.FrontSide,
+                color: 0xFFFFFF,
+                fog: false,
+                toneMapped: false,
+                transparent: true,
+                alphaTest: 0.1
+            });
+            
+            // Crear el mesh
+            this.mesh = new THREE.Mesh(geometry, material);
+            this.mesh.castShadow = true;
+            this.mesh.receiveShadow = true;
+            this.mesh.position.set(
+                this.x * Chunk.SIZE,
+                this.y * Chunk.HEIGHT,
+                this.z * Chunk.SIZE
+            );
+        } else {
+            // Si no hay geometría, establecer mesh a null
+            this.mesh = null;
         }
         
-        // Compute bounding box for frustum culling
-        geometry.computeBoundingBox();
-        
-        // Cargar textura del atlas
-        const textureLoader = new THREE.TextureLoader();
-        const texture = textureLoader.load('/assets/textures/atlas.png');
-        
-        // Configuración óptima para texturas pixeladas
-        texture.magFilter = THREE.NearestFilter;
-        texture.minFilter = THREE.NearestFilter;
-        texture.generateMipmaps = false;
-        texture.anisotropy = 1;
-        texture.wrapS = THREE.ClampToEdgeWrapping;
-        texture.wrapT = THREE.ClampToEdgeWrapping;
-        texture.premultiplyAlpha = false;
-        
-        // Usar MeshBasicMaterial para mostrar las texturas exactamente como son
-        const material = new THREE.MeshBasicMaterial({
-            map: texture,
-            side: THREE.FrontSide,
-            color: 0xFFFFFF, // Color base blanco puro
-            fog: false, // Desactivar niebla para mantener colores puros
-            toneMapped: false, // Desactivar mapeo de tonos para colores más brillantes
-            transparent: true,
-            alphaTest: 0.1
-        });
-        
-        // Create the mesh with the geometry and material
-        this.mesh = new THREE.Mesh(geometry, material);
-        this.mesh.castShadow = true;
-        this.mesh.receiveShadow = true;
-        this.mesh.position.set(
-            this.x * Chunk.SIZE,
-            this.y * Chunk.HEIGHT,
-            this.z * Chunk.SIZE
-        );
-        
-        // Mark as updated
+        // Marcar como actualizado
         this.needsUpdate = false;
     }
 }
