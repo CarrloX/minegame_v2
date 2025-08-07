@@ -30,20 +30,6 @@
             z-index: 100;
             pointer-events: none;
         }
-        
-        #fps-counter {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            color: white;
-            background-color: rgba(0,0,0,0.7);
-            padding: 10px;
-            border-radius: 5px;
-            font-family: monospace;
-            font-size: 16px;
-            z-index: 100;
-            pointer-events: none;
-        }
         #controls {
             position: absolute;
             bottom: 10px;
@@ -68,8 +54,6 @@
         <p>Rueda del mouse para hacer zoom</p>
         <p>Click derecho + arrastrar para mover la cámara</p>
     </div>
-    
-    <div id="fps-counter">FPS: 0</div>
     
     <div id="controls">
         <button id="toggleWireframe">Alternar Malla</button>
@@ -187,57 +171,16 @@
             );
         }
         
-        // Función para verificar si un bloque es sólido
-        function isBlockSolid(x, y, z, chunkData, CHUNK_SIZE, CHUNK_HEIGHT) {
-            // Si está fuera de los límites, no es sólido
-            if (x < 0 || x >= CHUNK_SIZE || y < 0 || y >= CHUNK_HEIGHT || z < 0 || z >= CHUNK_SIZE) {
-                return false;
-            }
-            // Verificar si el bloque existe y no es aire
-            return chunkData[x]?.[y]?.[z] !== 'air' && chunkData[x]?.[y]?.[z] !== undefined;
-        }
-
-        // Función para verificar si una cara es visible
-        function isFaceVisible(x, y, z, dx, dy, dz, chunkData, CHUNK_SIZE, CHUNK_HEIGHT) {
-            // Si el bloque actual no es sólido, no mostramos la cara
-            if (!isBlockSolid(x, y, z, chunkData, CHUNK_SIZE, CHUNK_HEIGHT)) {
-                return false;
-            }
-            
-            // Coordenadas del bloque adyacente en la dirección de la cara
-            const nx = x + (dx !== 0 ? (dx > 0 ? 0 : -1) : 0);
-            const ny = y + (dy !== 0 ? (dy > 0 ? 0 : -1) : 0);
-            const nz = z + (dz !== 0 ? (dz > 0 ? 0 : -1) : 0);
-            
-            // Si el bloque adyacente está fuera del chunk, mostramos la cara
-            if (nx < 0 || nx >= CHUNK_SIZE || ny < 0 || ny >= CHUNK_HEIGHT || nz < 0 || nz >= CHUNK_SIZE) {
-                return true;
-            }
-            
-            // Verificar si el bloque adyacente es sólido
-            const adjacentSolid = isBlockSolid(
-                x + (dx > 0 ? 1 : (dx < 0 ? -1 : 0)),
-                y + (dy > 0 ? 1 : (dy < 0 ? -1 : 0)),
-                z + (dz > 0 ? 1 : (dz < 0 ? -1 : 0)),
-                chunkData, CHUNK_SIZE, CHUNK_HEIGHT
-            );
-            
-            // Mostrar la cara solo si el bloque adyacente no es sólido
-            return !adjacentSolid;
-        }
-
         function createChunkMaterial(texture) {
             return new THREE.MeshBasicMaterial({
                 map: texture,
-                side: THREE.FrontSide, // Reactivar culling
+                side: THREE.FrontSide,
                 color: 0xFFFFFF,
                 fog: false,
                 toneMapped: false,
                 transparent: true,
                 alphaTest: 0.1,
-                wireframe: wireframeMode,
-                depthWrite: true,
-                depthTest: true
+                wireframe: wireframeMode
             });
         }
         
@@ -270,206 +213,6 @@
             ];
         }
         
-        // Función para verificar si un bloque es sólido
-        function isBlockSolid(x, y, z, chunkData, CHUNK_SIZE, CHUNK_HEIGHT) {
-            // Check if coordinates are outside chunk bounds
-            if (x < 0 || x >= CHUNK_SIZE || y < 0 || y >= CHUNK_HEIGHT || z < 0 || z >= CHUNK_SIZE) {
-                return false; // Consider outside as air
-            }
-            return chunkData[x]?.[y]?.[z] !== 'air';
-        }
-
-        // Función para verificar si una cara es visible
-        function isFaceVisible(x, y, z, dx, dy, dz, chunkData, CHUNK_SIZE, CHUNK_HEIGHT) {
-            // If current block is air, no face to show
-            if (!isBlockSolid(x, y, z, chunkData, CHUNK_SIZE, CHUNK_HEIGHT)) return false;
-            
-            // Check the adjacent block in the face direction
-            const nx = x + dx;
-            const ny = y + dy;
-            const nz = z + dz;
-            
-            // If adjacent block is outside chunk, show the face (chunk boundary)
-            if (nx < 0 || nx >= CHUNK_SIZE || ny < 0 || ny >= CHUNK_HEIGHT || nz < 0 || nz >= CHUNK_SIZE) {
-                return true;
-            }
-            
-            // Only show face if adjacent block is air
-            return !isBlockSolid(nx, ny, nz, chunkData, CHUNK_SIZE, CHUNK_HEIGHT);
-        }
-
-        // Función para generar una malla optimizada usando Greedy Meshing
-        function generateGreedyMesh(chunkData, CHUNK_SIZE, CHUNK_HEIGHT) {
-            const positions = [];
-            const normals = [];
-            const uvs = [];
-            const indices = [];
-            let vertexCount = 0;
-            
-            // Función para agregar una cara con Greedy Meshing
-            function addGreedyFace(vertices, normal, blockType, faceType) {
-                const startVertex = vertexCount;
-                
-                // Añadir vértices
-                for (let i = 0; i < vertices.length; i += 3) {
-                    positions.push(vertices[i], vertices[i+1], vertices[i+2]);
-                    normals.push(normal[0], normal[1], normal[2]);
-                }
-                
-                // Añadir UVs
-                const uvCoords = getUvCoords(blockType, faceType);
-                for (let i = 0; i < 4; i++) {
-                    uvs.push(uvCoords[i][0], uvCoords[i][1]);
-                }
-                
-                // Añadir índices (dos triángulos por cara)
-                indices.push(
-                    startVertex, startVertex + 1, startVertex + 2,
-                    startVertex + 2, startVertex + 3, startVertex
-                );
-                
-                vertexCount += 4;
-            }
-            
-            // Función para procesar una capa en una dirección específica
-            function processLayer(slice, axis, direction) {
-                const width = axis === 'x' ? CHUNK_HEIGHT : CHUNK_SIZE;
-                const height = axis === 'y' ? CHUNK_HEIGHT : CHUNK_SIZE;
-                const depth = axis === 'z' ? CHUNK_HEIGHT : CHUNK_SIZE;
-                
-                const mask = [];
-                
-                // Crear máscara 2D de bloques visibles
-                for (let u = 0; u < width; u++) {
-                    mask[u] = [];
-                    for (let v = 0; v < height; v++) {
-                        let x, y, z;
-                        if (axis === 'x') {
-                            x = slice;
-                            y = u;
-                            z = v;
-                        } else if (axis === 'y') {
-                            x = u;
-                            y = slice;
-                            z = v;
-                            x = u;
-                            y = v;
-                            z = slice;
-                        }
-                        
-                        // Comprobar si el bloque es sólido y tiene una cara visible en la dirección actual
-                        mask[u][v] = isBlockSolid(x, y, z, chunkData, CHUNK_SIZE, CHUNK_HEIGHT) && 
-                                   !isBlockSolid(
-                                       x + (axis === 'x' ? direction : 0),
-                                       y + (axis === 'y' ? direction : 0),
-                                       z + (axis === 'z' ? direction : 0),
-                                       chunkData, 
-                                       CHUNK_SIZE, 
-                                       CHUNK_HEIGHT
-                                   ) ? chunkData[x][y][z] : null;
-                    }
-                }
-                
-                // Algoritmo Greedy Meshing
-                for (let v = 0; v < height; v++) {
-                    for (let u = 0; u < width; ) {
-                        if (mask[u][v] === null) {
-                            u++;
-                            continue;
-                        }
-                        
-                        // Encontrar el ancho del rectángulo
-                        let w;
-                        for (w = 1; u + w < width && mask[u + w][v] === mask[u][v]; w++) {}
-                        
-                        // Encontrar la altura máxima posible para este ancho
-                        let h;
-                        for (h = 1; v + h < height; h++) {
-                            let k;
-                            for (k = 0; k < w; k++) {
-                                if (mask[u + k][v + h] !== mask[u][v]) {
-                                    break;
-                                }
-                            }
-                            if (k < w) break;
-                        }
-                        
-                        // Añadir la cara
-                        const blockType = mask[u][v];
-                        const x = axis === 'x' ? slice : u;
-                        const y = axis === 'y' ? slice : (axis === 'x' ? u : v);
-                        const z = axis === 'z' ? slice : v;
-                        
-                        // Crear vértices para la cara
-                        const vertices = [];
-                        const normal = [0, 0, 0];
-                        let faceType = 'side';
-                        
-                        if (axis === 'x') {
-                            const xPos = slice + (direction > 0 ? 1 : 0);
-                            normal[0] = direction;
-                            faceType = direction > 0 ? 'right' : 'left';
-                            
-                            if (direction > 0) {
-                                vertices.push(xPos, y, z + h, xPos, y, z, xPos, y + w, z, xPos, y + w, z + h);
-                            } else {
-                                vertices.push(x, y, z, x, y, z + h, x, y + w, z + h, x, y + w, z);
-                            }
-                        } else if (axis === 'y') {
-                            const yPos = slice + (direction > 0 ? 1 : 0);
-                            normal[1] = direction;
-                            faceType = direction > 0 ? 'top' : 'bottom';
-                            
-                            if (direction > 0) {
-                                vertices.push(x, yPos, z, x + w, yPos, z, x + w, yPos, z + h, x, yPos, z + h);
-                            } else {
-                                vertices.push(x, y, z, x + w, y, z, x + w, y, z + h, x, y, z + h);
-                            }
-                        } else { // z
-                            const zPos = slice + (direction > 0 ? 1 : 0);
-                            normal[2] = direction;
-                            faceType = direction > 0 ? 'front' : 'back';
-                            
-                            if (direction > 0) {
-                                vertices.push(x, y, zPos, x + w, y, zPos, x + w, y + h, zPos, x, y + h, zPos);
-                            } else {
-                                vertices.push(x, y, z, x, y + h, z, x + w, y + h, z, x + w, y, z);
-                            }
-                        }
-                        
-                        addGreedyFace(vertices, normal, blockType, faceType);
-                        
-                        // Marcar los bloques como procesados
-                        for (let i = 0; i < w; i++) {
-                            for (let j = 0; j < h; j++) {
-                                mask[u + i][v + j] = null;
-                            }
-                        }
-                        
-                        u += w;
-                    }
-                }
-            }
-            
-            // Procesar las 6 direcciones posibles (3 ejes * 2 direcciones)
-            for (let x = 0; x < CHUNK_SIZE; x++) {
-                processLayer(x, 'x', 1);  // Cara derecha
-                processLayer(x, 'x', -1); // Cara izquierda
-            }
-            
-            for (let y = 0; y < CHUNK_HEIGHT; y++) {
-                processLayer(y, 'y', 1);  // Cara superior
-                processLayer(y, 'y', -1); // Cara inferior
-            }
-            
-            for (let z = 0; z < CHUNK_SIZE; z++) {
-                processLayer(z, 'z', 1);  // Cara frontal
-                processLayer(z, 'z', -1); // Cara trasera
-            }
-            
-            return { positions, normals, uvs, indices };
-        }
-        
         function createTestChunk() {
             return new Promise((resolve, reject) => {
                 loadTexture(texturePath, function(error, texture) {
@@ -482,258 +225,169 @@
                     const material = createChunkMaterial(texture);
                     const geometry = new THREE.BufferGeometry();
                     
+                    const positions = [];
+                    const normals = [];
+                    const uvs = [];
+                    const indices = [];
+                    
                     const CHUNK_SIZE = 16;
                     const CHUNK_HEIGHT = 16;
                     
-
+                    // Create a 3D array to store block data
+                    const blocks = [];
+                    for (let x = 0; x < CHUNK_SIZE; x++) {
+                        blocks[x] = [];
+                        for (let y = 0; y < CHUNK_HEIGHT; y++) {
+                            blocks[x][y] = [];
+                            for (let z = 0; z < CHUNK_SIZE; z++) {
+                                blocks[x][y][z] = 0; // 0 = air, 1 = solid
+                            }
+                        }
+                    }
                     
-                    // Initialize chunk data
-                    const chunkData = Array(CHUNK_SIZE).fill().map(() => 
-                        Array(CHUNK_HEIGHT).fill().map(() => 
-                            Array(CHUNK_SIZE).fill('air')
-                        )
-                    );
-                    
-                    // Generate terrain
+                    // First pass: Mark all solid blocks
                     for (let x = 0; x < CHUNK_SIZE; x++) {
                         for (let z = 0; z < CHUNK_SIZE; z++) {
-                            const height = Math.floor(
-                                4 + Math.sin(x * 0.5) * 2 + Math.cos(z * 0.5) * 2
-                            );
-                            
+                            const height = Math.floor(4 + Math.sin(x * 0.5) * 2 + Math.cos(z * 0.5) * 2);
                             for (let y = 0; y < CHUNK_HEIGHT; y++) {
                                 if (y <= height) {
-                                    if (y === height) {
-                                        chunkData[x][y][z] = 'grass';
-                                    } else if (y > height - 3) {
-                                        chunkData[x][y][z] = 'dirt';
-                                    } else {
-                                        chunkData[x][y][z] = 'stone';
-                                    }
-                                } else {
-                                    chunkData[x][y][z] = 'air';
+                                    blocks[x][y][z] = 1; // Mark as solid
                                 }
                             }
                         }
+                    }
+                    
+                    // Function to check if a block is completely surrounded by other blocks (not visible)
+                    function isBlockHidden(x, y, z) {
+                        // If any of the 6 adjacent positions is air or out of bounds, the block is visible
+                        // Check top
+                        if (y === CHUNK_HEIGHT - 1 || blocks[x][y+1][z] === 0) return false;
+                        // Check bottom
+                        if (y === 0 || blocks[x][y-1][z] === 0) return false;
+                        // Check front
+                        if (z === CHUNK_SIZE - 1 || blocks[x][y][z+1] === 0) return false;
+                        // Check back
+                        if (z === 0 || blocks[x][y][z-1] === 0) return false;
+                        // Check right
+                        if (x === CHUNK_SIZE - 1 || blocks[x+1][y][z] === 0) return false;
+                        // Check left
+                        if (x === 0 || blocks[x-1][y][z] === 0) return false;
+                        
+                        // If we get here, the block is completely surrounded by other blocks
+                        return true;
                     }
                     
                     function addFace(vertices, normal, blockType, faceType = 'side') {
                         const vertexCount = positions.length / 3;
                         
-                        // Asegurarse de que los vértices estén en el orden correcto (sentido antihorario)
-                        // Los vértices deben estar ordenados en sentido antihorario cuando se miran desde afuera
-                        const orderedVertices = [
-                            [vertices[0], vertices[1], vertices[2]],   // Vértice 0
-                            [vertices[3], vertices[4], vertices[5]],   // Vértice 1
-                            [vertices[6], vertices[7], vertices[8]],   // Vértice 2
-                            [vertices[9], vertices[10], vertices[11]]  // Vértice 3
-                        ];
-                        
-                        // Añadir los 4 vértices de la cara en orden
-                        for (const [vx, vy, vz] of orderedVertices) {
-                            positions.push(vx, vy, vz);
+                        for (let i = 0; i < vertices.length; i += 3) {
+                            positions.push(vertices[i], vertices[i+1], vertices[i+2]);
                             normals.push(normal[0], normal[1], normal[2]);
                         }
                         
-                        // Obtener coordenadas UV
                         const uvCoords = getUvCoords(blockType, faceType);
                         
-                        // Añadir coordenadas UV para cada vértice
-                        // Asegurando que coincidan con el orden de los vértices
-                        for (let i = 0; i < 4; i++) {
+                        for (let i = 0; 4 > i; i++) {
                             uvs.push(uvCoords[i][0], uvCoords[i][1]);
                         }
                         
-                        // Crear dos triángulos que forman la cara (cuadrilátero)
-                        // Primer triángulo: 0-1-2 (sentido antihorario)
-                        indices.push(vertexCount, vertexCount + 1, vertexCount + 2);
-                        // Segundo triángulo: 0-2-3 (sentido antihorario)
-                        indices.push(vertexCount + 2, vertexCount + 3, vertexCount);
+                        indices.push(
+                            vertexCount, vertexCount + 1, vertexCount + 2,
+                            vertexCount, vertexCount + 2, vertexCount + 3
+                        );
                     }
             
-                    // Generar la malla usando Greedy Meshing (sin culling)
-                    const positions = [];
-                    const normals = [];
-                    const uvs = [];
-                    const indices = [];
-                    let vertexCount = 0;
-                    
-                    // Función local para agregar caras (versión optimizada para Greedy Meshing)
-                    function addFace(vertices, normal, blockType, faceType = 'side') {
-                        const baseVertex = vertexCount;
-                        
-                        // Añadir los 4 vértices de la cara
-                        for (let i = 0; i < 4; i++) {
-                            positions.push(
-                                vertices[i*3], 
-                                vertices[i*3 + 1], 
-                                vertices[i*3 + 2]
-                            );
-                            normals.push(normal[0], normal[1], normal[2]);
-                        }
-                        
-                        // Obtener coordenadas UV para esta cara
-                        const uvCoords = getUvCoords(blockType, faceType);
-                        
-                        // Añadir coordenadas UV para cada vértice
-                        for (let i = 0; i < 4; i++) {
-                            uvs.push(uvCoords[i][0], uvCoords[i][1]);
-                        }
-                        
-                        // Añadir índices para los dos triángulos (sentido antihorario)
-                        indices.push(
-                            baseVertex, baseVertex + 1, baseVertex + 2,
-                            baseVertex, baseVertex + 2, baseVertex + 3
-                        );
-                        
-                        vertexCount += 4;
-                    }
-                    
-                    // Generar caras usando Greedy Meshing
-                    const processed = new Set();
-                    
-                    // Procesar cada bloque
+                    // Second pass: Generate geometry only for visible blocks
                     for (let x = 0; x < CHUNK_SIZE; x++) {
-                        for (let y = 0; y < CHUNK_HEIGHT; y++) {
-                            for (let z = 0; z < CHUNK_SIZE; z++) {
-                                const blockType = chunkData[x][y][z];
-                                if (blockType === 'air' || processed.has(`${x},${y},${z}`)) continue;
-                                
-                                // Intentar expandir en X (máximo 4 bloques de ancho)
-                                let maxWidth = 4; // Límite de ancho para evitar estiramiento excesivo
-                                let width = 1;
-                                while (x + width < CHUNK_SIZE && 
-                                       width < maxWidth &&
-                                       chunkData[x + width][y][z] === blockType && 
-                                       !processed.has(`${x + width},${y},${z}`)) {
-                                    width++;
-                                }
-                                
-                                // Intentar expandir en Z (máximo 4 bloques de profundidad)
-                                const maxDepth = 4; // Límite de profundidad para evitar estiramiento excesivo
-                                let depth = 1;
-                                let canExpandDepth = true;
-                                
-                                // Verificar si podemos expandir en Z para todas las columnas X
-                                while (depth < maxDepth && canExpandDepth) {
-                                    // Verificar todas las columnas X en esta profundidad Z
-                                    for (let dx = 0; dx < width; dx++) {
-                                        if (z + depth >= CHUNK_SIZE || 
-                                            chunkData[x + dx][y][z + depth] !== blockType ||
-                                            processed.has(`${x + dx},${y},${z + depth}`)) {
-                                            canExpandDepth = false;
-                                            break;
-                                        }
+                        for (let z = 0; z < CHUNK_SIZE; z++) {
+                            const height = Math.floor(4 + Math.sin(x * 0.5) * 2 + Math.cos(z * 0.5) * 2);
+                            
+                            for (let y = 0; y < CHUNK_HEIGHT; y++) {
+                                if (blocks[x][y][z] === 1) { // Only process solid blocks
+                                    // Skip this block if it's completely surrounded by other blocks
+                                    if (isBlockHidden(x, y, z)) {
+                                        continue;
                                     }
                                     
-                                    if (canExpandDepth) {
-                                        depth++;
+                                    let blockType;
+                                    if (y === height) {
+                                        blockType = 'grass';
+                                    } else if (y > height - 3) {
+                                        blockType = 'dirt';
+                                    } else {
+                                        blockType = 'stone';
                                     }
-                                }
-                                
-                                // Marcar bloques como procesados
-                                for (let dx = 0; dx < width; dx++) {
-                                    for (let dz = 0; dz < depth; dz++) {
-                                        processed.add(`${x + dx},${y},${z + dz}`);
+                                    
+                                    const px = x;
+                                    const py = y;
+                                    const pz = z;
+                                    
+                                    // Check each face and only add it if the adjacent block is air
+                                    
+                                    // Front face (z+)
+                                    if (z === CHUNK_SIZE - 1 || (z < CHUNK_SIZE - 1 && blocks[x][y][z+1] === 0)) {
+                                        addFace(
+                                            [px, py, pz+1, px+1, py, pz+1, px+1, py+1, pz+1, px, py+1, pz+1],
+                                            [0, 0, 1],
+                                            blockType,
+                                            'front'
+                                        );
                                     }
-                                }
-                                
-                                // Añadir caras para este rectángulo de bloques
-                                const px = x;
-                                const py = y;
-                                const pz = z;
-                                
-                                // Front face (z + depth)
-                                if (isFaceVisible(px, py, pz + depth - 1, 0, 0, 1, chunkData, CHUNK_SIZE, CHUNK_HEIGHT)) {
-                                    addFace(
-                                        [px, py, pz + depth, px + width, py, pz + depth, 
-                                         px + width, py + 1, pz + depth, px, py + 1, pz + depth],
-                                        [0, 0, 1],
-                                        blockType,
-                                        blockType === 'grass' ? 'side' : 'side'
-                                    );
-                                }
-                                
-                                // Back face (z)
-                                if (isFaceVisible(px, py, pz, 0, 0, -1, chunkData, CHUNK_SIZE, CHUNK_HEIGHT)) {
-                                    addFace(
-                                        [px + width, py, pz, px, py, pz, 
-                                         px, py + 1, pz, px + width, py + 1, pz],
-                                        [0, 0, -1],
-                                        blockType,
-                                        blockType === 'grass' ? 'side' : 'side'
-                                    );
-                                }
-                                
-                                // Right face (x + width)
-                                if (isFaceVisible(px + width - 1, py, pz, 1, 0, 0, chunkData, CHUNK_SIZE, CHUNK_HEIGHT)) {
-                                    addFace(
-                                        [px + width, py, pz + depth, px + width, py, pz, 
-                                         px + width, py + 1, pz, px + width, py + 1, pz + depth],
-                                        [1, 0, 0],
-                                        blockType,
-                                        blockType === 'grass' ? 'side' : 'side'
-                                    );
-                                }
-                                
-                                // Left face (x)
-                                if (isFaceVisible(px, py, pz, -1, 0, 0, chunkData, CHUNK_SIZE, CHUNK_HEIGHT)) {
-                                    addFace(
-                                        [px, py, pz, px, py, pz + depth, 
-                                         px, py + 1, pz + depth, px, py + 1, pz],
-                                        [-1, 0, 0],
-                                        blockType,
-                                        blockType === 'grass' ? 'side' : 'side'
-                                    );
-                                }
-                                
-                                // Top face (y + 1)
-                                if (isFaceVisible(px, py + 1 - 1, pz, 0, 1, 0, chunkData, CHUNK_SIZE, CHUNK_HEIGHT)) {
-                                    const faceType = blockType === 'grass' ? 'top' : 'side';
-                                    addFace(
-                                        [px, py + 1, pz, px, py + 1, pz + depth, 
-                                         px + width, py + 1, pz + depth, px + width, py + 1, pz],
-                                        [0, 1, 0],
-                                        blockType,
-                                        faceType
-                                    );
-                                }
-                                
-                                // Bottom face (y)
-                                if (isFaceVisible(px, py, pz, 0, -1, 0, chunkData, CHUNK_SIZE, CHUNK_HEIGHT)) {
-                                    addFace(
-                                        [px, py, pz, px + width, py, pz, 
-                                         px + width, py, pz + depth, px, py, pz + depth],
-                                        [0, -1, 0],
-                                        blockType,
-                                        'bottom'
-                                    );
+                                    
+                                    // Back face (z-)
+                                    if (z === 0 || (z > 0 && blocks[x][y][z-1] === 0)) {
+                                        addFace(
+                                            [px+1, py, pz, px, py, pz, px, py+1, pz, px+1, py+1, pz],
+                                            [0, 0, -1],
+                                            blockType,
+                                            'back'
+                                        );
+                                    }
+                                    
+                                    // Right face (x+)
+                                    if (x === CHUNK_SIZE - 1 || (x < CHUNK_SIZE - 1 && blocks[x+1][y][z] === 0)) {
+                                        addFace(
+                                            [px+1, py, pz+1, px+1, py, pz, px+1, py+1, pz, px+1, py+1, pz+1],
+                                            [1, 0, 0],
+                                            blockType,
+                                            'right'
+                                        );
+                                    }
+                                    
+                                    // Left face (x-)
+                                    if (x === 0 || (x > 0 && blocks[x-1][y][z] === 0)) {
+                                        addFace(
+                                            [px, py, pz, px, py, pz+1, px, py+1, pz+1, px, py+1, pz],
+                                            [-1, 0, 0],
+                                            blockType,
+                                            'left'
+                                        );
+                                    }
+                                    
+                                    // Top face (y+)
+                                    if (y === CHUNK_HEIGHT - 1 || (y < CHUNK_HEIGHT - 1 && blocks[x][y+1][z] === 0)) {
+                                        addFace(
+                                            [px, py+1, pz, px, py+1, pz+1, px+1, py+1, pz+1, px+1, py+1, pz],
+                                            [0, 1, 0],
+                                            blockType,
+                                            'top'
+                                        );
+                                    }
+                                    
+                                    // Bottom face (y-)
+                                    if (y === 0 || (y > 0 && blocks[x][y-1][z] === 0)) {
+                                        addFace(
+                                            [px, py, pz, px+1, py, pz, px+1, py, pz+1, px, py, pz+1],
+                                            [0, -1, 0],
+                                            blockType,
+                                            'bottom'
+                                        );
+                                    }
                                 }
                             }
                         }
                     }
                     
-                    // Depuración: Mostrar estadísticas
-                    console.log('=== Estadísticas de la malla con Culling Mejorado ===');
-                    console.log(`Bloques totales: ${CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE}`);
-                    console.log(`Bloques procesados: ${processed.size}`);
-                    console.log(`Caras generadas: ${indices.length / 6}`);
-                    console.log(`Vértices generados: ${positions.length / 3}`);
-                    console.log(`Caras por bloque: ${(indices.length / 6) / processed.size}`);
-                    
-                    // Verificar si hay bloques no procesados
-                    const totalBlocks = CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE;
-                    const airBlocks = Array(CHUNK_SIZE).fill().flatMap((_, x) => 
-                        Array(CHUNK_HEIGHT).fill().flatMap((_, y) =>
-                            Array(CHUNK_SIZE).fill().map((_, z) => 
-                                chunkData[x][y][z] === 'air' ? 0 : 1
-                            )
-                        )
-                    ).reduce((a, b) => a + b, 0);
-                    console.log(`Bloques sólidos: ${airBlocks}`);
-                    console.log(`Bloques no procesados: ${airBlocks - processed.size}`);
-                    
-                    // Configurar la geometría con los buffers generados
                     geometry.setIndex(indices);
                     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
                     geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
@@ -780,58 +434,10 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         });
         
-        // FPS counter variables
-        const fpsSamples = [];
-        const maxSamples = 10;
-        let lastFpsUpdate = 0;
-        const fpsUpdateInterval = 200; // Update FPS counter every 200ms
-        let lastTime = performance.now();
-        let frameCount = 0;
-        let minFps = Infinity;
-        let maxFps = 0;
-        
-        function updateFpsCounter() {
-            const now = performance.now();
-            const delta = now - lastTime;
-            frameCount++;
-            
-            // Calculate FPS based on time since last update
-            if (delta >= fpsUpdateInterval) {
-                const fps = Math.round((frameCount * 1000) / delta);
-                
-                // Update min/max FPS
-                minFps = Math.min(minFps, fps);
-                maxFps = Math.max(maxFps, fps);
-                
-                // Store sample for moving average
-                fpsSamples.push(fps);
-                if (fpsSamples.length > maxSamples) {
-                    fpsSamples.shift();
-                }
-                
-                // Calculate average FPS
-                const avgFps = Math.round(fpsSamples.reduce((a, b) => a + b, 0) / fpsSamples.length);
-                
-                // Update display
-                const fpsElement = document.getElementById('fps-counter');
-                fpsElement.innerHTML = `
-                    FPS: ${fps} <span style="opacity: 0.7;">(Avg: ${avgFps})</span><br>
-                    <span style="font-size: 0.8em; opacity: 0.6;">
-                        Min: ${minFps} | Max: ${maxFps}
-                    </span>
-                `;
-                
-                // Reset counters
-                frameCount = 0;
-                lastTime = now - (delta % fpsUpdateInterval);
-            }
-        }
-        
         function animate() {
             requestAnimationFrame(animate);
             controls.update();
             renderer.render(scene, camera);
-            updateFpsCounter();
         }
         
         animate();
