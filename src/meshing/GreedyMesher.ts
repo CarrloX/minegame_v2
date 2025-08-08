@@ -192,7 +192,7 @@ export class GreedyMesher {
                     // Determine the width and height of the quad
                     let width = 1;
                     while (uu + width < this.CHUNK_SIZE && 
-                           mask[vv * this.CHUNK_SIZE + uu + width] === mask[vv * this.CHUNK_SIZE + uu]) {
+                           this.isSameBlockType(mask[vv * this.CHUNK_SIZE + uu + width], mask[vv * this.CHUNK_SIZE + uu])) {
                         width++;
                     }
                     
@@ -201,7 +201,7 @@ export class GreedyMesher {
                     
                     while (vv + height < this.CHUNK_SIZE && canExpandHeight) {
                         for (let i = 0; i < width; i++) {
-                            if (mask[(vv + height) * this.CHUNK_SIZE + uu + i] !== mask[vv * this.CHUNK_SIZE + uu]) {
+                            if (!this.isSameBlockType(mask[(vv + height) * this.CHUNK_SIZE + uu + i], mask[vv * this.CHUNK_SIZE + uu])) {
                                 canExpandHeight = false;
                                 break;
                             }
