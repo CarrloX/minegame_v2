@@ -212,15 +212,15 @@ export class GreedyMesher {
                         }
                     }
                     
+                    // Add the quad to the mesh
+                    const blockType = mask[vv * this.CHUNK_SIZE + uu];
+
                     // Mark these blocks as processed
                     for (let h = 0; h < height; h++) {
                         for (let w = 0; w < width; w++) {
                             mask[(vv + h) * this.CHUNK_SIZE + uu + w] = 0;
                         }
                     }
-                    
-                    // Add the quad to the mesh
-                    const blockType = mask[vv * this.CHUNK_SIZE + uu];
                     const prevIndexCount = meshData.indices.length;
                     
                     this.addQuad(
