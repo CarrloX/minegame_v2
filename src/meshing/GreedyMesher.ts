@@ -26,6 +26,9 @@ export class GreedyMesher {
         new THREE.Vector3(0, 0, -1)   // Back
     ];
 
+    // Value used to mark empty cells in the mask
+    private static readonly MASK_EMPTY = 0;
+
     // Get UV coordinates for a specific face of a block
     private static isSameBlockType(a: number, b: number): boolean {
         // Consider air blocks as the same for meshing purposes
@@ -45,46 +48,52 @@ export class GreedyMesher {
         const faceType = face === 2 ? 'top' : (face === 3 ? 'bottom' : 'side');
         const uv = BlockTextures[blockType][faceType];
         
+        // Get the base UV coordinates for a single tile
+        const u1 = uv.u;
+        const v1 = uv.v;
+        const u2 = uv.u + uv.width;
+        const v2 = uv.v + uv.height;
+        
         // Return UV coordinates in the correct order for the face
         // The order must match the vertex order in the addQuad method
         switch (face) {
             case 0: // Right
             case 4: // Front
                 return [
-                    uv.u, uv.v + uv.height * height,          // v0: bottom-left
-                    uv.u + uv.width * width, uv.v + uv.height * height, // v1: bottom-right
-                    uv.u + uv.width * width, uv.v,            // v2: top-right
-                    uv.u, uv.v                        // v3: top-left
+                    u1, v2 * height,  // v0: bottom-left
+                    u2 * width, v2 * height,  // v1: bottom-right
+                    u2 * width, v1,  // v2: top-right
+                    u1, v1           // v3: top-left
                 ];
             case 1: // Left
             case 5: // Back
                 return [
-                    uv.u + uv.width * width, uv.v + uv.height * height, // v0: bottom-right
-                    uv.u, uv.v + uv.height * height,           // v1: bottom-left
-                    uv.u, uv.v,                       // v2: top-left
-                    uv.u + uv.width * width, uv.v             // v3: top-right
+                    u2 * width, v2 * height,  // v0: bottom-right
+                    u1, v2 * height,          // v1: bottom-left
+                    u1, v1,                   // v2: top-left
+                    u2 * width, v1            // v3: top-right
                 ];
             case 2: // Top
                 return [
-                    uv.u, uv.v + uv.height * height,          // v0: near-left (using quad height for texture V)
-                    uv.u + uv.width * width, uv.v + uv.height * height, // v1: near-right (using quad width for texture U)
-                    uv.u + uv.width * width, uv.v,            // v2: far-right
-                    uv.u, uv.v                        // v3: far-left
+                    u1, v2 * height,  // v0: near-left
+                    u2 * width, v2 * height,  // v1: near-right
+                    u2 * width, v1,   // v2: far-right
+                    u1, v1            // v3: far-left
                 ];
             case 3: // Bottom
                 return [
-                    uv.u, uv.v,                      // v0: near-left
-                    uv.u + uv.width * width, uv.v,           // v1: near-right (using quad width for texture U)
-                    uv.u + uv.width * width, uv.v + uv.height * height, // v2: far-right (using quad height for texture V)
-                    uv.u, uv.v + uv.height * height           // v3: far-left
+                    u1, v1,           // v0: near-left
+                    u2 * width, v1,   // v1: near-right
+                    u2 * width, v2 * height,  // v2: far-right
+                    u1, v2 * height   // v3: far-left
                 ];
             default:
                 // Default to side texture for unknown faces
                 return [
-                    uv.u, uv.v + uv.height * height,
-                    uv.u + uv.width * width, uv.v + uv.height * height,
-                    uv.u + uv.width * width, uv.v,
-                    uv.u, uv.v
+                    u1, v2 * height,
+                    u2 * width, v2 * height,
+                    u2 * width, v1,
+                    u1, v1
                 ];
         }
     }
@@ -116,7 +125,7 @@ export class GreedyMesher {
 
     private static processFace(face: number, blocks: number[][][], meshData: MeshData, currentIndexOffset: number): number {
         // Create a 2D mask to track processed blocks
-        const mask = Array(this.CHUNK_SIZE * this.CHUNK_SIZE).fill(0);
+        const mask = Array(this.CHUNK_SIZE * this.CHUNK_SIZE).fill(this.MASK_EMPTY);
         
         // The current index offset is now passed as a parameter
         
@@ -130,14 +139,17 @@ export class GreedyMesher {
         
         // Process each layer along the primary axis
         for (let d = 0; d < this.CHUNK_SIZE; d++) {
+            // Calculate the actual layer position based on direction
+            const layerW = dir > 0 ? d : this.CHUNK_SIZE - 1 - d;
+            
             // Reset mask for this layer
-            mask.fill(0);
+            mask.fill(this.MASK_EMPTY);
             
             // Build the mask for this layer
             for (let vv = 0; vv < this.CHUNK_SIZE; vv++) {
                 for (let uu = 0; uu < this.CHUNK_SIZE; uu++) {
                     const pos = [0, 0, 0];
-                    const wPos = dir > 0 ? d : this.CHUNK_SIZE - 1 - d;
+                    const wPos = layerW;
                     
                     pos[u] = uu;
                     pos[v] = vv;
@@ -148,9 +160,8 @@ export class GreedyMesher {
                     neighborPos[w] += dir;
                     const neighborBlock = this.getBlock(blocks, neighborPos[0], neighborPos[1], neighborPos[2]);
                     
-                    // Mark as visible if current block is solid and neighbor is air or out of bounds
-                    if (currentBlock !== BlockType.AIR && 
-                        (neighborBlock === BlockType.AIR || neighborBlock === undefined)) {
+                    // Mark as visible if current block is solid and neighbor is air (or out of bounds, which returns AIR)
+                    if (currentBlock !== BlockType.AIR && neighborBlock === BlockType.AIR) {
                         mask[vv * this.CHUNK_SIZE + uu] = currentBlock;
                     }
                 }
@@ -159,7 +170,7 @@ export class GreedyMesher {
             // Generate quads using greedy meshing
             for (let vv = 0; vv < this.CHUNK_SIZE; vv++) {
                 for (let uu = 0; uu < this.CHUNK_SIZE; uu++) {
-                    if (mask[vv * this.CHUNK_SIZE + uu] === 0) continue;
+                    if (mask[vv * this.CHUNK_SIZE + uu] === this.MASK_EMPTY) continue;
                     
                     // Determine the width and height of the quad
                     let width = 1;
@@ -197,7 +208,7 @@ export class GreedyMesher {
                     
                     this.addQuad(
                         face, 
-                        uu, vv, d, 
+                        uu, vv, layerW, 
                         width, height, 
                         blockType,
                         meshData
@@ -299,11 +310,23 @@ export class GreedyMesher {
         const faceUVs = this.getFaceUVs(blockType, face, width, height);
         meshData.uvs.push(...faceUVs);
         
-        // Add indices (two triangles)
-        meshData.indices.push(
-            indexOffset, indexOffset + 1, indexOffset + 2,
-            indexOffset, indexOffset + 2, indexOffset + 3
-        );
+        // Determine winding order based on face direction (0-2 are positive normals, 3-5 are negative)
+        const isFrontFace = face < 3; // Right, Left, Top are front faces (dir > 0)
+        
+        // Add indices with correct winding order for backface culling
+        if (isFrontFace) {
+            // Clockwise winding for front faces
+            meshData.indices.push(
+                indexOffset, indexOffset + 1, indexOffset + 2,
+                indexOffset, indexOffset + 2, indexOffset + 3
+            );
+        } else {
+            // Counter-clockwise winding for back faces
+            meshData.indices.push(
+                indexOffset, indexOffset + 2, indexOffset + 1,
+                indexOffset, indexOffset + 3, indexOffset + 2
+            );
+        }
     }
 
 
