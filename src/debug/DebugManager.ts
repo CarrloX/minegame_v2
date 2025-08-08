@@ -54,19 +54,25 @@ export class DebugManager {
 
         for (const [key, mesh] of chunkMeshes.entries()) {
             if (this.wireframeEnabled) {
-                if (!this.originalMaterials.has(key)) {
-                    this.originalMaterials.set(key, mesh.material);
-                }
-                const color = mesh.userData.levelOfDetail === 'simple' ? 0xffa500 : 0x00ff00;
-                mesh.material = new THREE.MeshBasicMaterial({ 
-                    wireframe: true,
-                    color
-                });
+                this.applyWireframeToMesh(key, mesh);
             } else {
                 if (this.originalMaterials.has(key)) {
                     mesh.material = this.originalMaterials.get(key)!;
                 }
             }
+        }
+    }
+
+    public applyWireframeToMesh(key: string, mesh: THREE.Mesh): void {
+        if (this.wireframeEnabled) {
+            if (!this.originalMaterials.has(key)) {
+                this.originalMaterials.set(key, mesh.material);
+            }
+            const color = mesh.userData.levelOfDetail === 'simple' ? 0xffa500 : 0x00ff00;
+            mesh.material = new THREE.MeshBasicMaterial({
+                wireframe: true,
+                color
+            });
         }
     }
 }

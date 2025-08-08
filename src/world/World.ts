@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Chunk } from './Chunk';
 import { BlockType } from './BlockType';
+import { DebugManager } from '../debug/DebugManager';
 
 /**
  * Represents the game world containing chunks of blocks
@@ -19,6 +20,7 @@ export class World {
     
     // Reference to the Three.js scene
     private scene: THREE.Scene | null = null;
+    private debugManager: DebugManager | null = null;
     
     // Texture loader and atlas
     private textureLoader: THREE.TextureLoader;
@@ -26,18 +28,13 @@ export class World {
     
     /**
      * Creates a new World instance
-     * @param scene The Three.js scene to add chunk meshes to
      */
-    constructor(scene?: THREE.Scene) {
+    constructor() {
         // Initialize texture loader
         this.textureLoader = new THREE.TextureLoader();
         
         // Load the texture atlas
         this.loadTextureAtlas();
-        
-        if (scene) {
-            this.setScene(scene);
-        }
     }
     
     /**
@@ -50,8 +47,7 @@ export class World {
     }
     
     /**
-     * Sets the Three.js scene for this world
-     * @param scene The Three.js scene to add chunk meshes to
+     * Initializes the world and loads initial chunks
      */
     public initialize(startPosition: THREE.Vector3): void {
         const playerChunkX = Math.floor(startPosition.x / Chunk.SIZE);
@@ -70,15 +66,31 @@ export class World {
         }
     }
 
-    public setScene(scene: THREE.Scene): void {
-        // Remove all existing meshes from the old scene
+    /**
+     * Sets the Three.js scene and debug manager for this world
+     */
+    public setScene(scene: THREE.Scene, debugManager: DebugManager): void {
+        this.debugManager = debugManager;
         this.removeAllMeshes();
-        
-        // Set the new scene
         this.scene = scene;
-        
-        // Add all existing chunks to the new scene
         this.addAllChunksToScene();
+    }
+
+    private addAllChunksToScene(): void {
+        if (!this.scene) return;
+        for (const chunk of this.chunks.values()) {
+            const mesh = this.chunkMeshes.get(this.getChunkKey(chunk.x, chunk.y, chunk.z));
+            const levelOfDetail = mesh?.userData.levelOfDetail || 'detailed';
+            this.addChunkToScene(chunk, levelOfDetail);
+        }
+    }
+
+    private removeAllMeshes(): void {
+        if (!this.scene) return;
+        for (const mesh of this.chunkMeshes.values()) {
+            this.scene.remove(mesh);
+        }
+        this.chunkMeshes.clear();
     }
     
     /**
@@ -86,21 +98,13 @@ export class World {
      */
     public generateChunk(chunkX: number, chunkY: number, chunkZ: number): Chunk {
         const chunkKey = this.getChunkKey(chunkX, chunkY, chunkZ);
-        
-        // Return existing chunk if it already exists
         if (this.chunks.has(chunkKey)) {
             return this.chunks.get(chunkKey)!;
         }
         
-        // Create a new chunk
         const chunk = new Chunk(chunkX, chunkY, chunkZ);
         this.chunks.set(chunkKey, chunk);
-        
-        // Generate chunk terrain
         this.generateChunkTerrain(chunk);
-        
-
-        
         return chunk;
     }
     
@@ -108,63 +112,33 @@ export class World {
      * Generates terrain for a chunk
      */
     private generateChunkTerrain(chunk: Chunk): void {
-        // Simple terrain generation: flat world with a layer of grass on top of dirt
         const localGroundLevel = this.GROUND_LEVEL - (chunk.y * Chunk.HEIGHT);
-        
-        // Only generate blocks if this chunk is at or below the ground level
         if (chunk.y <= 0) {
-            // Fill the bottom of the world with stone
-            chunk.fill(
-                0, 0, 0,  // min x, y, z
-                Chunk.SIZE - 1, Math.min(Chunk.HEIGHT - 1, localGroundLevel - 1), Chunk.SIZE - 1,  // max x, y, z
-                BlockType.STONE
-            );
-            
-            // Add a layer of dirt on top of the stone
+            chunk.fill(0, 0, 0, Chunk.SIZE - 1, Math.min(Chunk.HEIGHT - 1, localGroundLevel - 2), Chunk.SIZE - 1, BlockType.STONE);
+            if (localGroundLevel -1 >= 0 && localGroundLevel -1 < Chunk.HEIGHT) {
+                chunk.fill(0, localGroundLevel -1, 0, Chunk.SIZE - 1, localGroundLevel -1, Chunk.SIZE - 1, BlockType.DIRT);
+            }
             if (localGroundLevel >= 0 && localGroundLevel < Chunk.HEIGHT) {
-                chunk.fill(
-                    0, localGroundLevel, 0,  // min x, y, z
-                    Chunk.SIZE - 1, localGroundLevel, Chunk.SIZE - 1,  // max x, y, z
-                    BlockType.DIRT
-                );
-                
-                // Add grass on the very top layer
-                if (chunk.y === 0) {  // Only add grass to the top chunk
-                    chunk.fill(
-                        0, localGroundLevel, 0,  // min x, y, z
-                        Chunk.SIZE - 1, localGroundLevel, Chunk.SIZE - 1,  // max x, y, z
-                        BlockType.GRASS
-                    );
-                }
+                chunk.fill(0, localGroundLevel, 0, Chunk.SIZE - 1, localGroundLevel, Chunk.SIZE - 1, BlockType.GRASS);
             }
         }
     }
     
-    /**
-     * Gets a chunk by its chunk coordinates
-     */
     public getChunk(chunkX: number, chunkY: number, chunkZ: number): Chunk | undefined {
-        const chunkKey = this.getChunkKey(chunkX, chunkY, chunkZ);
-        return this.chunks.get(chunkKey);
+        return this.chunks.get(this.getChunkKey(chunkX, chunkY, chunkZ));
     }
     
-    /**
-     * Gets or generates a chunk by its chunk coordinates
-     */
     public getOrGenerateChunk(chunkX: number, chunkY: number, chunkZ: number): Chunk {
         return this.getChunk(chunkX, chunkY, chunkZ) || this.generateChunk(chunkX, chunkY, chunkZ);
     }
     
-    /**
-     * Gets the block at the specified world coordinates
-     */
     public getHighestBlockY(x: number, z: number): number {
         for (let y = Chunk.HEIGHT - 1; y >= 0; y--) {
             if (this.getBlock(x, y, z) !== BlockType.AIR) {
                 return y + 1;
             }
         }
-        return 0; // Default to 0 if no block is found
+        return 0;
     }
 
     public getBlock(x: number, y: number, z: number): BlockType {
@@ -180,9 +154,6 @@ export class World {
         return chunk ? chunk.getBlock(localX, localY, localZ) : BlockType.AIR;
     }
     
-    /**
-     * Sets the block at the specified world coordinates
-     */
     public setBlock(x: number, y: number, z: number, blockType: BlockType): void {
         const chunkX = Math.floor(x / Chunk.SIZE);
         const chunkY = Math.floor(y / Chunk.HEIGHT);
@@ -192,21 +163,29 @@ export class World {
         const localY = y - (chunkY * Chunk.HEIGHT);
         const localZ = z - (chunkZ * Chunk.SIZE);
         
-        // Get or generate the chunk if it doesn't exist
         const chunk = this.getOrGenerateChunk(chunkX, chunkY, chunkZ);
         chunk.setBlock(localX, localY, localZ, blockType);
+        this.markChunkDirty(chunkX, chunkY, chunkZ);
+
+        const adjacentChunks = this.getAdjacentChunks(chunkX, chunkY, chunkZ, localX, localY, localZ);
+        adjacentChunks.forEach(adjChunk => this.markChunkDirty(adjChunk.x, adjChunk.y, adjChunk.z));
+    }
+
+    private getAdjacentChunks(chunkX: number, chunkY: number, chunkZ: number, localX: number, localY: number, localZ: number): Chunk[] {
+        const adjacentChunks: Chunk[] = [];
+        if (localX === 0) adjacentChunks.push(this.getOrGenerateChunk(chunkX - 1, chunkY, chunkZ));
+        if (localX === Chunk.SIZE - 1) adjacentChunks.push(this.getOrGenerateChunk(chunkX + 1, chunkY, chunkZ));
+        if (localY === 0) adjacentChunks.push(this.getOrGenerateChunk(chunkX, chunkY - 1, chunkZ));
+        if (localY === Chunk.HEIGHT - 1) adjacentChunks.push(this.getOrGenerateChunk(chunkX, chunkY + 1, chunkZ));
+        if (localZ === 0) adjacentChunks.push(this.getOrGenerateChunk(chunkX, chunkY, chunkZ - 1));
+        if (localZ === Chunk.SIZE - 1) adjacentChunks.push(this.getOrGenerateChunk(chunkX, chunkY, chunkZ + 1));
+        return adjacentChunks;
     }
     
-    /**
-     * Gets a unique string key for a chunk based on its coordinates
-     */
     private getChunkKey(x: number, y: number, z: number): string {
         return `${x},${y},${z}`;
     }
     
-    /**
-     * Gets all loaded chunks
-     */
     public getChunkMeshes(): Map<string, THREE.Mesh> {
         return this.chunkMeshes;
     }
@@ -215,71 +194,33 @@ export class World {
         return Array.from(this.chunks.values());
     }
     
-    /**
-     * Adds a chunk's mesh to the scene
-     * @param chunk The chunk to add to the scene
-     */
     private addChunkToScene(chunk: Chunk, levelOfDetail: 'detailed' | 'simple'): void {
         if (!this.scene) return;
-        
         const chunkKey = this.getChunkKey(chunk.x, chunk.y, chunk.z);
+        
+        this.removeChunkFromScene(chunk.x, chunk.y, chunk.z); // Remove old mesh if it exists
 
-        // If the chunk is already in the scene, do nothing
-        if (this.chunkMeshes.has(chunkKey)) {
-            return;
-        }
-
-        const mesh = chunk.getMesh(levelOfDetail);
+        const mesh = chunk.getMesh(levelOfDetail, this);
         if (mesh) {
             mesh.userData.levelOfDetail = levelOfDetail;
             this.chunkMeshes.set(chunkKey, mesh);
             this.scene.add(mesh);
+            if (this.debugManager) {
+                this.debugManager.applyWireframeToMesh(chunkKey, mesh);
+            }
         }
     }
     
-    /**
-     * Removes a chunk's mesh from the scene
-     */
     private removeChunkFromScene(chunkX: number, chunkY: number, chunkZ: number): void {
         if (!this.scene) return;
-        
         const chunkKey = this.getChunkKey(chunkX, chunkY, chunkZ);
         const mesh = this.chunkMeshes.get(chunkKey);
-        
         if (mesh) {
             this.scene.remove(mesh);
             this.chunkMeshes.delete(chunkKey);
         }
     }
     
-    /**
-     * Adds all chunks to the scene
-     */
-    private addAllChunksToScene(): void {
-        if (!this.scene) return;
-        
-        for (const chunk of this.chunks.values()) {
-            this.addChunkToScene(chunk, 'detailed');
-        }
-    }
-    
-    /**
-     * Removes all chunk meshes from the scene
-     */
-    private removeAllMeshes(): void {
-        if (!this.scene) return;
-        
-        for (const mesh of this.chunkMeshes.values()) {
-            this.scene.remove(mesh);
-        }
-        
-        this.chunkMeshes.clear();
-    }
-    
-    /**
-     * Updates the world (call this every frame)
-     * @param deltaTime Time since last update in seconds
-     */
     public update(playerPosition: THREE.Vector3): void {
         this.loadChunksAroundPlayer(playerPosition);
         this.updateDirtyChunks();
@@ -300,35 +241,27 @@ export class World {
         const playerChunkZ = Math.floor(playerPosition.z / Chunk.SIZE);
         const requiredChunks = new Set<string>();
 
-        // Determine which chunks should be loaded
         for (let x = -this.viewDistance; x <= this.viewDistance; x++) {
             for (let z = -this.viewDistance; z <= this.viewDistance; z++) {
                 const chunkX = playerChunkX + x;
                 const chunkZ = playerChunkZ + z;
-                // For now, we only consider y=0 for chunks
                 const chunkKey = this.getChunkKey(chunkX, 0, chunkZ);
                 requiredChunks.add(chunkKey);
 
                 const distance = Math.sqrt(x*x + z*z);
                 const levelOfDetail = distance <= this.detailedViewDistance ? 'detailed' : 'simple';
 
-                // Load new chunks or update LoD of existing ones
-                if (!this.chunks.has(chunkKey)) {
+                const existingMesh = this.chunkMeshes.get(chunkKey);
+                if (!existingMesh) {
                     const chunk = this.generateChunk(chunkX, 0, chunkZ);
                     this.addChunkToScene(chunk, levelOfDetail);
-                } else {
-                    const mesh = this.chunkMeshes.get(chunkKey);
-                    if (mesh && mesh.userData.levelOfDetail !== levelOfDetail) {
-                        const chunk = this.chunks.get(chunkKey)!;
-                        chunk.markDirty(); // Force the mesh to be updated
-                        this.removeChunkFromScene(chunk.x, chunk.y, chunk.z);
-                        this.addChunkToScene(chunk, levelOfDetail);
-                    }
+                } else if (existingMesh.userData.levelOfDetail !== levelOfDetail) {
+                    const chunk = this.chunks.get(chunkKey)!;
+                    this.addChunkToScene(chunk, levelOfDetail);
                 }
             }
         }
 
-        // Unload chunks that are no longer needed
         for (const chunkKey of this.chunks.keys()) {
             if (!requiredChunks.has(chunkKey)) {
                 const [x, y, z] = chunkKey.split(',').map(Number);
@@ -337,44 +270,27 @@ export class World {
         }
     }
     
-    /**
-     * Updates any chunks that have been marked as dirty
-     */
     private updateDirtyChunks(): void {
         for (const chunk of this.chunks.values()) {
-            const mesh = chunk.getMesh();
-            const chunkKey = this.getChunkKey(chunk.x, chunk.y, chunk.z);
-            
-            // If the chunk has a new mesh, update it in the scene
-            if (mesh && !this.chunkMeshes.has(chunkKey)) {
-                this.addChunkToScene(chunk, 'detailed');
+            if (chunk.isDirty) {
+                const mesh = this.chunkMeshes.get(this.getChunkKey(chunk.x, chunk.y, chunk.z));
+                const levelOfDetail = mesh?.userData.levelOfDetail || 'detailed';
+                this.addChunkToScene(chunk, levelOfDetail);
+                chunk.isDirty = false;
             }
         }
     }
     
-    /**
-     * Marks a chunk as dirty, forcing its mesh to be updated
-     */
     public markChunkDirty(chunkX: number, chunkY: number, chunkZ: number): void {
-        const chunkKey = this.getChunkKey(chunkX, chunkY, chunkZ);
-        const chunk = this.chunks.get(chunkKey);
-        
+        const chunk = this.chunks.get(this.getChunkKey(chunkX, chunkY, chunkZ));
         if (chunk) {
             chunk.markDirty();
         }
     }
     
-    /**
-     * Disposes of all resources used by the world
-     */
     public dispose(): void {
-        // Remove all meshes from the scene
         this.removeAllMeshes();
-        
-        // Clear chunks
         this.chunks.clear();
-        
-        // Clear the scene reference
         this.scene = null;
     }
 }

@@ -18,8 +18,8 @@ window.addEventListener('DOMContentLoaded', () => {
         // Create and initialize the renderer
         const renderer = new Renderer();
         
-        // Create the world instance with the renderer's scene
-        const world = new World(renderer.getScene());
+        // Create the world instance
+        const world = new World();
         
         // Create player instance with the renderer's camera
         const camera = renderer.getCamera();
@@ -42,6 +42,7 @@ window.addEventListener('DOMContentLoaded', () => {
         
         // Create the game instance with the renderer, world, and player
         const debugManager = new DebugManager(world);
+        world.setScene(renderer.getScene(), debugManager);
         const game = new Game(renderer, world, player, debugManager);
 
         debugManager.initKeyboardControls();

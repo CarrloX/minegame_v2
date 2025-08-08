@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { BlockType } from './BlockType';
 import { GreedyMesher } from './GreedyMesher';
 
+
 /**
  * Represents a 16x16x16 chunk of blocks in the world
  */
@@ -13,13 +14,13 @@ export class Chunk {
     // Indexed as [x + z * SIZE + y * SIZE * SIZE]
     private blocks: Uint8Array;
     private mesh: THREE.Mesh | null;
-    private needsUpdate: boolean;
+    public isDirty: boolean;
     
     // Chunk position in chunk coordinates (not block coordinates)
     constructor(public readonly x: number, public readonly y: number, public readonly z: number) {
         this.blocks = new Uint8Array(Chunk.SIZE * Chunk.SIZE * Chunk.HEIGHT);
         this.mesh = null;
-        this.needsUpdate = true;
+        this.isDirty = true;
     }
     
     /**
@@ -85,15 +86,15 @@ export class Chunk {
      * Marks the chunk as needing a mesh update
      */
     public markDirty(): void {
-        this.needsUpdate = true;
+        this.isDirty = true;
     }
     
     /**
      * Gets the chunk's mesh, creating it if necessary
      */
-    public getMesh(levelOfDetail: 'detailed' | 'simple' = 'detailed'): THREE.Mesh | null {
-        if (this.needsUpdate) {
-            this.updateMesh(levelOfDetail);
+    public getMesh(levelOfDetail: 'detailed' | 'simple' = 'detailed', world: import('./World').World): THREE.Mesh | null {
+        if (this.isDirty) {
+            this.updateMesh(levelOfDetail, world);
         }
         return this.mesh;
     }
@@ -112,7 +113,7 @@ export class Chunk {
     /**
      * Updates the chunk's mesh based on its block data using simple face culling
      */
-    private updateMesh(levelOfDetail: 'detailed' | 'simple'): void {
+    private updateMesh(levelOfDetail: 'detailed' | 'simple', world: import('./World').World): void {
         // Dispose of the old mesh if it exists
         if (this.mesh) {
             const geometry = this.mesh.geometry as THREE.BufferGeometry;
@@ -128,7 +129,7 @@ export class Chunk {
         
         if (this.isEmpty()) {
             this.mesh = null;
-            this.needsUpdate = false;
+            this.isDirty = false;
             return;
         }
         
@@ -237,8 +238,8 @@ export class Chunk {
                     
                     // Verificar cada cara y agregarla si es visible
                     
-                    // Front face (z+)
-                    if (z === Chunk.SIZE - 1 || this.getBlock(x, y, z+1) === BlockType.AIR) {
+                    const frontBlock = (z === Chunk.SIZE - 1) ? world.getBlock(this.x * Chunk.SIZE + x, this.y * Chunk.HEIGHT + y, this.z * Chunk.SIZE + z + 1) : this.getBlock(x, y, z + 1);
+                    if (frontBlock === BlockType.AIR) {
                         addFace(
                             [px, py, pz+1, px+1, py, pz+1, px+1, py+1, pz+1, px, py+1, pz+1],
                             [0, 0, 1],
@@ -247,8 +248,8 @@ export class Chunk {
                         );
                     }
                     
-                    // Back face (z-)
-                    if (z === 0 || this.getBlock(x, y, z-1) === BlockType.AIR) {
+                    const backBlock = (z === 0) ? world.getBlock(this.x * Chunk.SIZE + x, this.y * Chunk.HEIGHT + y, this.z * Chunk.SIZE + z - 1) : this.getBlock(x, y, z - 1);
+                    if (backBlock === BlockType.AIR) {
                         addFace(
                             [px+1, py, pz, px, py, pz, px, py+1, pz, px+1, py+1, pz],
                             [0, 0, -1],
@@ -257,8 +258,8 @@ export class Chunk {
                         );
                     }
                     
-                    // Right face (x+)
-                    if (x === Chunk.SIZE - 1 || this.getBlock(x+1, y, z) === BlockType.AIR) {
+                    const rightBlock = (x === Chunk.SIZE - 1) ? world.getBlock(this.x * Chunk.SIZE + x + 1, this.y * Chunk.HEIGHT + y, this.z * Chunk.SIZE + z) : this.getBlock(x + 1, y, z);
+                    if (rightBlock === BlockType.AIR) {
                         addFace(
                             [px+1, py, pz+1, px+1, py, pz, px+1, py+1, pz, px+1, py+1, pz+1],
                             [1, 0, 0],
@@ -267,8 +268,8 @@ export class Chunk {
                         );
                     }
                     
-                    // Left face (x-)
-                    if (x === 0 || this.getBlock(x-1, y, z) === BlockType.AIR) {
+                    const leftBlock = (x === 0) ? world.getBlock(this.x * Chunk.SIZE + x - 1, this.y * Chunk.HEIGHT + y, this.z * Chunk.SIZE + z) : this.getBlock(x - 1, y, z);
+                    if (leftBlock === BlockType.AIR) {
                         addFace(
                             [px, py, pz, px, py, pz+1, px, py+1, pz+1, px, py+1, pz],
                             [-1, 0, 0],
@@ -277,8 +278,8 @@ export class Chunk {
                         );
                     }
                     
-                    // Top face (y+)
-                    if (y === Chunk.HEIGHT - 1 || this.getBlock(x, y+1, z) === BlockType.AIR) {
+                    const topBlock = (y === Chunk.HEIGHT - 1) ? world.getBlock(this.x * Chunk.SIZE + x, this.y * Chunk.HEIGHT + y + 1, this.z * Chunk.SIZE + z) : this.getBlock(x, y + 1, z);
+                    if (topBlock === BlockType.AIR) {
                         addFace(
                             [px, py+1, pz, px, py+1, pz+1, px+1, py+1, pz+1, px+1, py+1, pz],
                             [0, 1, 0],
@@ -287,8 +288,8 @@ export class Chunk {
                         );
                     }
                     
-                    // Bottom face (y-)
-                    if (y === 0 || this.getBlock(x, y-1, z) === BlockType.AIR) {
+                    const bottomBlock = (y === 0) ? world.getBlock(this.x * Chunk.SIZE + x, this.y * Chunk.HEIGHT + y - 1, this.z * Chunk.SIZE + z) : this.getBlock(x, y - 1, z);
+                    if (bottomBlock === BlockType.AIR) {
                         addFace(
                             [px, py, pz, px+1, py, pz, px+1, py, pz+1, px, py, pz+1],
                             [0, -1, 0],
@@ -358,6 +359,6 @@ export class Chunk {
         }
         
         // Marcar como actualizado
-        this.needsUpdate = false;
+        this.isDirty = false;
     }
 }
