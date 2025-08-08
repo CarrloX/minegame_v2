@@ -7,6 +7,7 @@ import { Game } from './core/Game';
 import { World } from './world/World';
 import { Player } from './player/Player';
 import { FirstPersonControls } from './player/FirstPersonControls';
+import { DebugManager } from './debug/DebugManager';
 
 // Wait for the DOM to be fully loaded before starting the game
 window.addEventListener('DOMContentLoaded', () => {
@@ -36,6 +37,10 @@ window.addEventListener('DOMContentLoaded', () => {
         
         // Create the game instance with the renderer, world, and player
         const game = new Game(renderer, world, player);
+
+        // Initialize debug manager
+        const debugManager = new DebugManager(world);
+        debugManager.initKeyboardControls();
         
         // Start the game
         game.start();

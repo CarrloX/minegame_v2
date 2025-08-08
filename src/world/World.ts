@@ -202,6 +202,10 @@ export class World {
     /**
      * Gets all loaded chunks
      */
+    public getChunkMeshes(): Map<string, THREE.Mesh> {
+        return this.chunkMeshes;
+    }
+
     public getAllChunks(): Chunk[] {
         return Array.from(this.chunks.values());
     }
