@@ -135,18 +135,17 @@ export class GreedyMesher {
 
         // Process each face direction (right, left, top, bottom, front, back)
         for (let face = 0; face < 6; face++) {
-            this.processFace(face, blocks, meshData);
+            currentIndexOffset = this.processFace(face, blocks, meshData, currentIndexOffset);
         }
 
         return meshData;
     }
 
-    private static processFace(face: number, blocks: number[][][], meshData: MeshData): void {
+    private static processFace(face: number, blocks: number[][][], meshData: MeshData, currentIndexOffset: number): number {
         // Create a 2D mask to track processed blocks
         const mask = Array(this.CHUNK_SIZE * this.CHUNK_SIZE).fill(0);
         
-        // Track the current index offset for material groups
-        let currentIndexOffset = 0;
+        // The current index offset is now passed as a parameter
         
         // Determine the primary axis and the other two axes based on face
         const u = (face % 3 + 1) % 3;
@@ -249,6 +248,7 @@ export class GreedyMesher {
                 }
             }
         }
+        return currentIndexOffset;
     }
 
     private static addQuad(
@@ -263,7 +263,6 @@ export class GreedyMesher {
         
         // Define the four corners of the quad
         const positions: THREE.Vector3[] = [];
-        const uvs: number[] = [];
         
         // Determine quad position based on face direction
         switch (face) {
