@@ -17,15 +17,6 @@ export interface MeshData {
 
 export class GreedyMesher {
     private static readonly CHUNK_SIZE = 16;
-    private static readonly FACE_INDICES = [
-        [4, 5, 6, 7],  // Right
-        [0, 3, 2, 1],  // Left
-        [5, 4, 0, 1],  // Top
-        [6, 7, 3, 2],  // Bottom
-        [1, 2, 6, 5],  // Front
-        [0, 4, 7, 3]   // Back
-    ];
-
     private static readonly NORMALS = [
         new THREE.Vector3(1, 0, 0),   // Right
         new THREE.Vector3(-1, 0, 0),  // Left
@@ -49,7 +40,7 @@ export class GreedyMesher {
      * - For all faces, the order is: v0, v1, v2, v3 (four vertices of the quad)
      * - The order is different for each face to ensure correct face culling
      */
-    private static getFaceUVs(blockType: BlockType, face: number): number[] {
+    private static getFaceUVs(blockType: BlockType, face: number, width: number, height: number): number[] {
         // Determine the face type (top, bottom, or side)
         const faceType = face === 2 ? 'top' : (face === 3 ? 'bottom' : 'side');
         const uv = BlockTextures[blockType][faceType];
@@ -58,59 +49,41 @@ export class GreedyMesher {
         // The order must match the vertex order in the addQuad method
         switch (face) {
             case 0: // Right
-                // Order: v0, v1, v2, v3 (clockwise when viewed from the front)
+            case 4: // Front
                 return [
-                    uv.u, uv.v + uv.height,          // v0: bottom-left
-                    uv.u + uv.width, uv.v + uv.height, // v1: bottom-right
-                    uv.u + uv.width, uv.v,            // v2: top-right
+                    uv.u, uv.v + uv.height * height,          // v0: bottom-left
+                    uv.u + uv.width * width, uv.v + uv.height * height, // v1: bottom-right
+                    uv.u + uv.width * width, uv.v,            // v2: top-right
                     uv.u, uv.v                        // v3: top-left
                 ];
             case 1: // Left
-                // Order: v0, v1, v2, v3 (clockwise when viewed from the front)
+            case 5: // Back
                 return [
-                    uv.u + uv.width, uv.v + uv.height, // v0: bottom-right
-                    uv.u, uv.v + uv.height,           // v1: bottom-left
+                    uv.u + uv.width * width, uv.v + uv.height * height, // v0: bottom-right
+                    uv.u, uv.v + uv.height * height,           // v1: bottom-left
                     uv.u, uv.v,                       // v2: top-left
-                    uv.u + uv.width, uv.v             // v3: top-right
+                    uv.u + uv.width * width, uv.v             // v3: top-right
                 ];
             case 2: // Top
-                // Order: v0, v1, v2, v3 (clockwise when viewed from above)
                 return [
-                    uv.u, uv.v + uv.height,          // v0: near-left
-                    uv.u + uv.width, uv.v + uv.height, // v1: near-right
-                    uv.u + uv.width, uv.v,            // v2: far-right
+                    uv.u, uv.v + uv.height * height,          // v0: near-left (using quad height for texture V)
+                    uv.u + uv.width * width, uv.v + uv.height * height, // v1: near-right (using quad width for texture U)
+                    uv.u + uv.width * width, uv.v,            // v2: far-right
                     uv.u, uv.v                        // v3: far-left
                 ];
             case 3: // Bottom
-                // Order: v0, v1, v2, v3 (clockwise when viewed from below)
                 return [
                     uv.u, uv.v,                      // v0: near-left
-                    uv.u + uv.width, uv.v,           // v1: near-right
-                    uv.u + uv.width, uv.v + uv.height, // v2: far-right
-                    uv.u, uv.v + uv.height           // v3: far-left
-                ];
-            case 4: // Front
-                // Order: v0, v1, v2, v3 (clockwise when viewed from the front)
-                return [
-                    uv.u, uv.v + uv.height,          // v0: bottom-left
-                    uv.u + uv.width, uv.v + uv.height, // v1: bottom-right
-                    uv.u + uv.width, uv.v,            // v2: top-right
-                    uv.u, uv.v                        // v3: top-left
-                ];
-            case 5: // Back
-                // Order: v0, v1, v2, v3 (clockwise when viewed from the back)
-                return [
-                    uv.u + uv.width, uv.v + uv.height, // v0: bottom-right
-                    uv.u, uv.v + uv.height,           // v1: bottom-left
-                    uv.u, uv.v,                       // v2: top-left
-                    uv.u + uv.width, uv.v             // v3: top-right
+                    uv.u + uv.width * width, uv.v,           // v1: near-right (using quad width for texture U)
+                    uv.u + uv.width * width, uv.v + uv.height * height, // v2: far-right (using quad height for texture V)
+                    uv.u, uv.v + uv.height * height           // v3: far-left
                 ];
             default:
                 // Default to side texture for unknown faces
                 return [
-                    uv.u, uv.v + uv.height,
-                    uv.u + uv.width, uv.v + uv.height,
-                    uv.u + uv.width, uv.v,
+                    uv.u, uv.v + uv.height * height,
+                    uv.u + uv.width * width, uv.v + uv.height * height,
+                    uv.u + uv.width * width, uv.v,
                     uv.u, uv.v
                 ];
         }
@@ -322,8 +295,8 @@ export class GreedyMesher {
             meshData.normals.push(normal.x, normal.y, normal.z);
         }
         
-        // Add UVs from texture atlas
-        const faceUVs = this.getFaceUVs(blockType, face);
+        // Add UVs from texture atlas, scaled by the quad's width and height
+        const faceUVs = this.getFaceUVs(blockType, face, width, height);
         meshData.uvs.push(...faceUVs);
         
         // Add indices (two triangles)
