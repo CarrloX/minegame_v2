@@ -231,6 +231,7 @@ export class World {
 
         const mesh = chunk.getMesh(levelOfDetail);
         if (mesh) {
+            mesh.userData.levelOfDetail = levelOfDetail;
             this.chunkMeshes.set(chunkKey, mesh);
             this.scene.add(mesh);
         }
@@ -308,12 +309,21 @@ export class World {
                 const chunkKey = this.getChunkKey(chunkX, 0, chunkZ);
                 requiredChunks.add(chunkKey);
 
-                // Load new chunks if they don't exist
+                const distance = Math.sqrt(x*x + z*z);
+                const levelOfDetail = distance <= this.detailedViewDistance ? 'detailed' : 'simple';
+
+                // Load new chunks or update LoD of existing ones
                 if (!this.chunks.has(chunkKey)) {
-                    const distance = Math.sqrt(x*x + z*z);
-                    const levelOfDetail = distance <= this.detailedViewDistance ? 'detailed' : 'simple';
                     const chunk = this.generateChunk(chunkX, 0, chunkZ);
                     this.addChunkToScene(chunk, levelOfDetail);
+                } else {
+                    const mesh = this.chunkMeshes.get(chunkKey);
+                    if (mesh && mesh.userData.levelOfDetail !== levelOfDetail) {
+                        const chunk = this.chunks.get(chunkKey)!;
+                        chunk.markDirty(); // Force the mesh to be updated
+                        this.removeChunkFromScene(chunk.x, chunk.y, chunk.z);
+                        this.addChunkToScene(chunk, levelOfDetail);
+                    }
                 }
             }
         }

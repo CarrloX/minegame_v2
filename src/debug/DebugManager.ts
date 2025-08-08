@@ -57,9 +57,10 @@ export class DebugManager {
                 if (!this.originalMaterials.has(key)) {
                     this.originalMaterials.set(key, mesh.material);
                 }
+                const color = mesh.userData.levelOfDetail === 'simple' ? 0xffa500 : 0x00ff00;
                 mesh.material = new THREE.MeshBasicMaterial({ 
                     wireframe: true,
-                    color: 0x00ff00
+                    color
                 });
             } else {
                 if (this.originalMaterials.has(key)) {
