@@ -24,6 +24,7 @@ export class Game {
         this.player = player;
         this.debugManager = debugManager;
         
+
         // Bind the game loop to maintain 'this' context
         this.gameLoop = this.gameLoop.bind(this);
     }
@@ -42,7 +43,7 @@ export class Game {
      */
     private update(deltaTime: number): void {
         // Update the world (this will handle chunk updates)
-        this.world.update();
+        this.world.update(this.player.position);
         
         // Update other game systems here (player, physics, etc.)
         // For now, we'll just log the FPS

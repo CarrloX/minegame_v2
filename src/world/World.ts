@@ -14,6 +14,7 @@ export class World {
     
     // World generation parameters
     private readonly GROUND_LEVEL = 4; // Y-level of the ground surface
+    public viewDistance = 4; // in chunks
     
     // Reference to the Three.js scene
     private scene: THREE.Scene | null = null;
@@ -36,9 +37,6 @@ export class World {
         if (scene) {
             this.setScene(scene);
         }
-        
-        // Initialize the world with some chunks
-        this.generateInitialChunks();
     }
     
     /**
@@ -54,6 +52,10 @@ export class World {
      * Sets the Three.js scene for this world
      * @param scene The Three.js scene to add chunk meshes to
      */
+    public initialize(startPosition: THREE.Vector3): void {
+        this.loadChunksAroundPlayer(startPosition);
+    }
+
     public setScene(scene: THREE.Scene): void {
         // Remove all existing meshes from the old scene
         this.removeAllMeshes();
@@ -63,14 +65,6 @@ export class World {
         
         // Add all existing chunks to the new scene
         this.addAllChunksToScene();
-    }
-    
-    /**
-     * Generates initial chunks around the origin
-     */
-    private generateInitialChunks(): void {
-        // For now, just generate a single chunk at (0,0,0)
-        this.generateChunk(0, 0, 0);
     }
     
     /**
@@ -274,10 +268,47 @@ export class World {
      * Updates the world (call this every frame)
      * @param deltaTime Time since last update in seconds
      */
-    public update(): void {
-        // Update any dynamic world elements here
-        // For now, we'll just update all dirty chunks
+    public update(playerPosition: THREE.Vector3): void {
+        this.loadChunksAroundPlayer(playerPosition);
         this.updateDirtyChunks();
+    }
+
+    private unloadChunk(chunkX: number, chunkY: number, chunkZ: number): void {
+        const chunkKey = this.getChunkKey(chunkX, chunkY, chunkZ);
+        if (this.chunks.has(chunkKey)) {
+            this.removeChunkFromScene(chunkX, chunkY, chunkZ);
+            this.chunks.delete(chunkKey);
+        }
+    }
+
+    private loadChunksAroundPlayer(playerPosition: THREE.Vector3): void {
+        const playerChunkX = Math.floor(playerPosition.x / Chunk.SIZE);
+        const playerChunkZ = Math.floor(playerPosition.z / Chunk.SIZE);
+        const requiredChunks = new Set<string>();
+
+        // Determine which chunks should be loaded
+        for (let x = -this.viewDistance; x <= this.viewDistance; x++) {
+            for (let z = -this.viewDistance; z <= this.viewDistance; z++) {
+                const chunkX = playerChunkX + x;
+                const chunkZ = playerChunkZ + z;
+                // For now, we only consider y=0 for chunks
+                const chunkKey = this.getChunkKey(chunkX, 0, chunkZ);
+                requiredChunks.add(chunkKey);
+
+                // Load new chunks if they don't exist
+                if (!this.chunks.has(chunkKey)) {
+                    this.generateChunk(chunkX, 0, chunkZ);
+                }
+            }
+        }
+
+        // Unload chunks that are no longer needed
+        for (const chunkKey of this.chunks.keys()) {
+            if (!requiredChunks.has(chunkKey)) {
+                const [x, y, z] = chunkKey.split(',').map(Number);
+                this.unloadChunk(x, y, z);
+            }
+        }
     }
     
     /**

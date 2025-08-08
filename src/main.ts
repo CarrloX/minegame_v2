@@ -2,6 +2,7 @@
  * Main entry point for the Minecraft Clone
  */
 
+import * as THREE from 'three';
 import { Renderer } from './rendering/Renderer';
 import { Game } from './core/Game';
 import { World } from './world/World';
@@ -27,7 +28,11 @@ window.addEventListener('DOMContentLoaded', () => {
         const player = new Player(camera, controls, world);
         const spawnX = 8;
         const spawnZ = 8;
-        const spawnY = world.getHighestBlockY(spawnX, spawnZ);
+
+        // Initialize the world at the spawn point to generate the initial chunks
+        world.initialize({ x: spawnX, y: 0, z: spawnZ } as THREE.Vector3);
+
+        const spawnY = world.getHighestBlockY(spawnX, spawnZ) + 1;
 
         // Set player's initial position (feet)
         player.position.set(spawnX, spawnY, spawnZ);
