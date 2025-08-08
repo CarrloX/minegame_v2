@@ -1,12 +1,13 @@
-import * as THREE from 'three';
 import { Renderer } from '../rendering/Renderer';
 import { World } from '../world/World';
 import { Player } from '../player/Player';
+import { DebugManager } from '../debug/DebugManager';
 
 export class Game {
     private renderer: Renderer;
     private world: World;
     private player: Player;
+    private debugManager: DebugManager;
     private isRunning: boolean = false;
     private lastTime: number = 0;
     private animationFrameId: number | null = null;
@@ -17,10 +18,11 @@ export class Game {
      * @param world - The world instance that contains the game world
      * @param player - The player instance that controls the camera
      */
-    constructor(renderer: Renderer, world: World, player: Player) {
+    constructor(renderer: Renderer, world: World, player: Player, debugManager: DebugManager) {
         this.renderer = renderer;
         this.world = world;
         this.player = player;
+        this.debugManager = debugManager;
         
         // Bind the game loop to maintain 'this' context
         this.gameLoop = this.gameLoop.bind(this);
@@ -40,7 +42,7 @@ export class Game {
      */
     private update(deltaTime: number): void {
         // Update the world (this will handle chunk updates)
-        this.world.update(deltaTime);
+        this.world.update();
         
         // Update other game systems here (player, physics, etc.)
         // For now, we'll just log the FPS
@@ -128,5 +130,6 @@ export class Game {
         this.player.dispose();
         this.world.dispose();
         this.renderer.dispose();
+        this.debugManager.dispose();
     }
 }

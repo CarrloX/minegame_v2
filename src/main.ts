@@ -36,10 +36,9 @@ window.addEventListener('DOMContentLoaded', () => {
         camera.position.set(spawnX, spawnY + 1.6, spawnZ);
         
         // Create the game instance with the renderer, world, and player
-        const game = new Game(renderer, world, player);
-
-        // Initialize debug manager
         const debugManager = new DebugManager(world);
+        const game = new Game(renderer, world, player, debugManager);
+
         debugManager.initKeyboardControls();
         
         // Start the game

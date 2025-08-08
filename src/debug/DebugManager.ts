@@ -10,12 +10,18 @@ export class DebugManager {
         this.world = world;
     }
 
+    private onKeyDown = (event: KeyboardEvent) => {
+        if (event.key.toLowerCase() === 'm') {
+            this.toggleWireframe();
+        }
+    };
+
     public initKeyboardControls(): void {
-        window.addEventListener('keydown', (event) => {
-            if (event.key.toLowerCase() === 'm') {
-                this.toggleWireframe();
-            }
-        });
+        window.addEventListener('keydown', this.onKeyDown);
+    }
+
+    public dispose(): void {
+        window.removeEventListener('keydown', this.onKeyDown);
     }
 
     public toggleWireframe(): void {
