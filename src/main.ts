@@ -1,11 +1,12 @@
 /**
  * Main entry point for the Minecraft Clone
  */
-import * as THREE from 'three';
+
 import { Renderer } from './rendering/Renderer';
 import { Game } from './core/Game';
 import { World } from './world/World';
 import { Player } from './player/Player';
+import { FirstPersonControls } from './player/FirstPersonControls';
 
 // Wait for the DOM to be fully loaded before starting the game
 window.addEventListener('DOMContentLoaded', () => {
@@ -20,8 +21,10 @@ window.addEventListener('DOMContentLoaded', () => {
         
         // Create player instance with the renderer's camera
         const camera = renderer.getCamera();
-        const startPosition = new THREE.Vector3(0, 1.6, 0); // Player eye level
-        const player = new Player(camera, startPosition);
+        camera.position.set(0, 1.8, 5); // Set a default starting position
+
+        const controls = new FirstPersonControls(camera, renderer.getRenderer().domElement);
+        const player = new Player(camera, controls);
         
         // Create the game instance with the renderer, world, and player
         const game = new Game(renderer, world, player);
@@ -39,11 +42,11 @@ window.addEventListener('DOMContentLoaded', () => {
             game.dispose();
         });
         
-        // Focus the canvas for keyboard input
-        const canvas = document.querySelector('canvas');
-        if (canvas) {
-            canvas.focus();
-        }
+        // Handle mouse click to lock pointer
+        const canvas = renderer.getRenderer().domElement;
+        canvas.addEventListener('click', () => {
+            controls.lock();
+        });
         
         console.log('Game initialized successfully!');
     } catch (error) {
