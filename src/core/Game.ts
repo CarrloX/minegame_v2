@@ -75,6 +75,7 @@ export class Game {
      * @param time - The current timestamp from requestAnimationFrame
      */
     private gameLoop(time: number): void {
+        this.debugManager.updateStats();
         if (!this.isRunning) return;
         
         // Calculate delta time in seconds
