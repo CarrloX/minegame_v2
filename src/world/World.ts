@@ -275,8 +275,10 @@ export class World {
 
     private unloadChunk(chunkX: number, chunkY: number, chunkZ: number): void {
         const chunkKey = this.getChunkKey(chunkX, chunkY, chunkZ);
-        if (this.chunks.has(chunkKey)) {
+        const chunk = this.chunks.get(chunkKey);
+        if (chunk) {
             this.removeChunkFromScene(chunkX, chunkY, chunkZ);
+            chunk.dispose();
             this.chunks.delete(chunkKey);
         }
     }

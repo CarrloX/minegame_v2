@@ -96,6 +96,17 @@ export class Chunk {
         }
         return this.mesh;
     }
+
+    public dispose(): void {
+        if (this.mesh) {
+            this.mesh.geometry.dispose();
+            if (Array.isArray(this.mesh.material)) {
+                this.mesh.material.forEach(material => material.dispose());
+            } else {
+                this.mesh.material.dispose();
+            }
+        }
+    }
     
     /**
      * Updates the chunk's mesh based on its block data using simple face culling
