@@ -14,7 +14,8 @@ export class World {
     
     // World generation parameters
     private readonly GROUND_LEVEL = 4; // Y-level of the ground surface
-    public viewDistance = 4; // in chunks
+    public viewDistance = 8; // in chunks
+    public detailedViewDistance = 2; // in chunks
     
     // Reference to the Three.js scene
     private scene: THREE.Scene | null = null;
@@ -53,7 +54,20 @@ export class World {
      * @param scene The Three.js scene to add chunk meshes to
      */
     public initialize(startPosition: THREE.Vector3): void {
-        this.loadChunksAroundPlayer(startPosition);
+        const playerChunkX = Math.floor(startPosition.x / Chunk.SIZE);
+        const playerChunkZ = Math.floor(startPosition.z / Chunk.SIZE);
+
+        for (let x = -this.viewDistance; x <= this.viewDistance; x++) {
+            for (let z = -this.viewDistance; z <= this.viewDistance; z++) {
+                const chunkX = playerChunkX + x;
+                const chunkZ = playerChunkZ + z;
+
+                const chunk = this.generateChunk(chunkX, 0, chunkZ);
+                const distance = Math.sqrt(x*x + z*z);
+                const levelOfDetail = distance <= this.detailedViewDistance ? 'detailed' : 'simple';
+                this.addChunkToScene(chunk, levelOfDetail);
+            }
+        }
     }
 
     public setScene(scene: THREE.Scene): void {
@@ -85,10 +99,7 @@ export class World {
         // Generate chunk terrain
         this.generateChunkTerrain(chunk);
         
-        // Create and add mesh for this chunk if we have a scene
-        if (this.scene) {
-            this.addChunkToScene(chunk);
-        }
+
         
         return chunk;
     }
@@ -208,17 +219,17 @@ export class World {
      * Adds a chunk's mesh to the scene
      * @param chunk The chunk to add to the scene
      */
-    private addChunkToScene(chunk: Chunk): void {
+    private addChunkToScene(chunk: Chunk, levelOfDetail: 'detailed' | 'simple'): void {
         if (!this.scene) return;
         
         const chunkKey = this.getChunkKey(chunk.x, chunk.y, chunk.z);
-        
-        // Remove existing mesh if it exists
-        this.removeChunkFromScene(chunk.x, chunk.y, chunk.z);
-        
-        // Get or create the chunk's mesh
-        const mesh = chunk.getMesh();
-        
+
+        // If the chunk is already in the scene, do nothing
+        if (this.chunkMeshes.has(chunkKey)) {
+            return;
+        }
+
+        const mesh = chunk.getMesh(levelOfDetail);
         if (mesh) {
             this.chunkMeshes.set(chunkKey, mesh);
             this.scene.add(mesh);
@@ -247,7 +258,7 @@ export class World {
         if (!this.scene) return;
         
         for (const chunk of this.chunks.values()) {
-            this.addChunkToScene(chunk);
+            this.addChunkToScene(chunk, 'detailed');
         }
     }
     
@@ -299,7 +310,10 @@ export class World {
 
                 // Load new chunks if they don't exist
                 if (!this.chunks.has(chunkKey)) {
-                    this.generateChunk(chunkX, 0, chunkZ);
+                    const distance = Math.sqrt(x*x + z*z);
+                    const levelOfDetail = distance <= this.detailedViewDistance ? 'detailed' : 'simple';
+                    const chunk = this.generateChunk(chunkX, 0, chunkZ);
+                    this.addChunkToScene(chunk, levelOfDetail);
                 }
             }
         }
@@ -323,7 +337,7 @@ export class World {
             
             // If the chunk has a new mesh, update it in the scene
             if (mesh && !this.chunkMeshes.has(chunkKey)) {
-                this.addChunkToScene(chunk);
+                this.addChunkToScene(chunk, 'detailed');
             }
         }
     }

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { BlockType } from './BlockType';
+import { GreedyMesher } from './GreedyMesher';
 
 /**
  * Represents a 16x16x16 chunk of blocks in the world
@@ -90,9 +91,9 @@ export class Chunk {
     /**
      * Gets the chunk's mesh, creating it if necessary
      */
-    public getMesh(): THREE.Mesh | null {
+    public getMesh(levelOfDetail: 'detailed' | 'simple' = 'detailed'): THREE.Mesh | null {
         if (this.needsUpdate) {
-            this.updateMesh();
+            this.updateMesh(levelOfDetail);
         }
         return this.mesh;
     }
@@ -111,7 +112,7 @@ export class Chunk {
     /**
      * Updates the chunk's mesh based on its block data using simple face culling
      */
-    private updateMesh(): void {
+    private updateMesh(levelOfDetail: 'detailed' | 'simple'): void {
         // Dispose of the old mesh if it exists
         if (this.mesh) {
             const geometry = this.mesh.geometry as THREE.BufferGeometry;
@@ -300,10 +301,16 @@ export class Chunk {
         }
         
         // Crear la geometría final
-        const geometry = new THREE.BufferGeometry();
+        let geometry: THREE.BufferGeometry | null = null;
+
+        if (levelOfDetail === 'simple') {
+            geometry = GreedyMesher.generateMesh(this);
+        } else {
+            geometry = new THREE.BufferGeometry();
+        }
         
         // Configurar atributos
-        if (positions.length > 0) {
+        if (geometry && positions.length > 0) {
             geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
             geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
             geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
