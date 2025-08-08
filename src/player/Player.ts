@@ -1,9 +1,12 @@
 import * as THREE from 'three';
 import { FirstPersonControls } from './FirstPersonControls';
+import { World } from '../world/World';
+import { BlockType } from '../world/BlockType';
 
 export class Player {
-    public camera: THREE.Camera;
-    public controls: FirstPersonControls;
+    public camera: THREE.PerspectiveCamera;
+    private controls: FirstPersonControls;
+    private world: World;
 
     public position: THREE.Vector3;
     public velocity: THREE.Vector3;
@@ -15,9 +18,10 @@ export class Player {
 
     private keys: { [key: string]: boolean } = {};
 
-    constructor(camera: THREE.Camera, controls: FirstPersonControls) {
+    public constructor(camera: THREE.PerspectiveCamera, controls: FirstPersonControls, world: World) {
         this.camera = camera;
         this.controls = controls;
+        this.world = world;
 
         this.position = new THREE.Vector3();
         this.velocity = new THREE.Vector3();
@@ -38,13 +42,56 @@ export class Player {
         this.keys[event.key.toLowerCase()] = false;
     }
 
-    public update(deltaTime: number) {
-        const moveSpeed = this.speed * deltaTime;
+    private checkCollision(position: THREE.Vector3): boolean {
+        const playerBoundingBox = new THREE.Box3(
+            new THREE.Vector3(position.x - 0.3, position.y, position.z - 0.3),
+            new THREE.Vector3(position.x + 0.3, position.y + 1.8, position.z + 0.3)
+        );
 
-        if (this.keys['w']) this.controls.moveForward(moveSpeed);
-        if (this.keys['s']) this.controls.moveForward(-moveSpeed);
-        if (this.keys['a']) this.controls.moveRight(-moveSpeed);
-        if (this.keys['d']) this.controls.moveRight(moveSpeed);
+        const minX = Math.floor(playerBoundingBox.min.x);
+        const maxX = Math.ceil(playerBoundingBox.max.x);
+        const minY = Math.floor(playerBoundingBox.min.y);
+        const maxY = Math.ceil(playerBoundingBox.max.y);
+        const minZ = Math.floor(playerBoundingBox.min.z);
+        const maxZ = Math.ceil(playerBoundingBox.max.z);
+
+        for (let y = minY; y < maxY; y++) {
+            for (let x = minX; x < maxX; x++) {
+                for (let z = minZ; z < maxZ; z++) {
+                    const block = this.world.getBlock(x, y, z);
+                    if (block !== BlockType.AIR) {
+                        const blockBoundingBox = new THREE.Box3(
+                            new THREE.Vector3(x, y, z),
+                            new THREE.Vector3(x + 1, y + 1, z + 1)
+                        );
+                        if (playerBoundingBox.intersectsBox(blockBoundingBox)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    public update(deltaTime: number): void {
+        const forward = new THREE.Vector3();
+        const right = new THREE.Vector3();
+        this.controls.getDirection(forward, right);
+
+        const moveDirection = new THREE.Vector3();
+        if (this.keys['w']) moveDirection.add(forward);
+        if (this.keys['s']) moveDirection.sub(forward);
+        if (this.keys['d']) moveDirection.add(right);
+        if (this.keys['a']) moveDirection.sub(right);
+
+        if (moveDirection.length() > 0) {
+            moveDirection.normalize();
+        }
+
+        this.velocity.x = moveDirection.x * this.speed;
+        this.velocity.z = moveDirection.z * this.speed;
 
         if (this.keys[' '] && this.onGround) {
             this.velocity.y = this.jumpForce;
@@ -52,15 +99,41 @@ export class Player {
         }
 
         this.velocity.y += this.gravity * deltaTime;
-        this.camera.position.y += this.velocity.y * deltaTime;
 
-        if (this.camera.position.y < 1.8) {
+        const newPosition = this.position.clone();
+
+        // Y-axis collision
+        newPosition.y += this.velocity.y * deltaTime;
+        if (this.checkCollision(newPosition)) {
+            if (this.velocity.y < 0) {
+                this.onGround = true;
+            }
             this.velocity.y = 0;
-            this.camera.position.y = 1.8;
-            this.onGround = true;
+            newPosition.y = this.position.y;
+        } else {
+            this.onGround = false;
         }
 
-        this.position.copy(this.camera.position);
+        // X-axis collision
+        newPosition.x += this.velocity.x * deltaTime;
+        if (this.checkCollision(newPosition)) {
+            this.velocity.x = 0;
+            newPosition.x = this.position.x;
+        }
+
+        // Z-axis collision
+        newPosition.z += this.velocity.z * deltaTime;
+        if (this.checkCollision(newPosition)) {
+            this.velocity.z = 0;
+            newPosition.z = this.position.z;
+        }
+
+        this.position.copy(newPosition);
+
+
+
+        this.camera.position.copy(this.position);
+        this.camera.position.y += 1.6; // Player eye height
     }
 
     public dispose() {

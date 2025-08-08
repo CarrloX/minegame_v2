@@ -21,10 +21,18 @@ window.addEventListener('DOMContentLoaded', () => {
         
         // Create player instance with the renderer's camera
         const camera = renderer.getCamera();
-        camera.position.set(0, 1.8, 5); // Set a default starting position
 
         const controls = new FirstPersonControls(camera, renderer.getRenderer().domElement);
-        const player = new Player(camera, controls);
+        const player = new Player(camera, controls, world);
+        const spawnX = 8;
+        const spawnZ = 8;
+        const spawnY = world.getHighestBlockY(spawnX, spawnZ);
+
+        // Set player's initial position (feet)
+        player.position.set(spawnX, spawnY, spawnZ);
+
+        // Set camera's initial position (eyes)
+        camera.position.set(spawnX, spawnY + 1.6, spawnZ);
         
         // Create the game instance with the renderer, world, and player
         const game = new Game(renderer, world, player);

@@ -7,7 +7,6 @@ export class FirstPersonControls {
     public isLocked = false;
 
     private euler = new THREE.Euler(0, 0, 0, 'YXZ');
-    private vec = new THREE.Vector3();
 
     public minPolarAngle = 0;
     public maxPolarAngle = Math.PI;
@@ -63,14 +62,14 @@ export class FirstPersonControls {
         this.domElement.ownerDocument.exitPointerLock();
     }
 
-    public moveForward(distance: number) {
-        this.vec.setFromMatrixColumn(this.camera.matrix, 0);
-        this.vec.crossVectors(this.camera.up, this.vec);
-        this.camera.position.addScaledVector(this.vec, distance);
-    }
+    public getDirection(forward: THREE.Vector3, right: THREE.Vector3) {
+        // Get the camera's forward direction
+        this.camera.getWorldDirection(forward);
+        forward.y = 0;
+        forward.normalize();
 
-    public moveRight(distance: number) {
-        this.vec.setFromMatrixColumn(this.camera.matrix, 0);
-        this.camera.position.addScaledVector(this.vec, distance);
+        // Get the camera's right direction
+        right.copy(forward);
+        right.cross(this.camera.up);
     }
 }

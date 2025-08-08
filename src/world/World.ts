@@ -153,6 +153,15 @@ export class World {
     /**
      * Gets the block at the specified world coordinates
      */
+    public getHighestBlockY(x: number, z: number): number {
+        for (let y = Chunk.HEIGHT - 1; y >= 0; y--) {
+            if (this.getBlock(x, y, z) !== BlockType.AIR) {
+                return y + 1;
+            }
+        }
+        return 0; // Default to 0 if no block is found
+    }
+
     public getBlock(x: number, y: number, z: number): BlockType {
         const chunkX = Math.floor(x / Chunk.SIZE);
         const chunkY = Math.floor(y / Chunk.HEIGHT);
@@ -261,7 +270,7 @@ export class World {
      * Updates the world (call this every frame)
      * @param deltaTime Time since last update in seconds
      */
-    public update(deltaTime: number): void {
+    public update(): void {
         // Update any dynamic world elements here
         // For now, we'll just update all dirty chunks
         this.updateDirtyChunks();
