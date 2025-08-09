@@ -93,9 +93,9 @@ export class Chunk {
     /**
      * Gets the chunk's mesh, creating it if necessary
      */
-    public getMesh(levelOfDetail: 'detailed' | 'simple' = 'detailed', world: import('./World').World): THREE.Mesh | null {
+    public getMesh(mode: 'detailed' | 'greedy' = 'detailed', world: import('./World').World): THREE.Mesh | null {
         if (this.isDirty) {
-            this.updateMesh(levelOfDetail, world);
+            this.updateMesh(mode, world);
         }
         return this.mesh;
     }
@@ -114,7 +114,7 @@ export class Chunk {
     /**
      * Updates the chunk's mesh based on its block data using simple face culling
      */
-    private updateMesh(levelOfDetail: 'detailed' | 'simple', world: any): void {
+    private updateMesh(mode: 'detailed' | 'greedy', world: any): void {
         // Dispose of the old mesh if it exists
         if (this.mesh) {
             const geometry = this.mesh.geometry as THREE.BufferGeometry;
@@ -132,34 +132,8 @@ export class Chunk {
             return;
         }
 
-        // Obtener posición del jugador/cámara del world (si existe)
-        let playerPos: THREE.Vector3 | null = null;
-        if (world) {
-            if (typeof world.getPlayerPosition === 'function') {
-                const p = world.getPlayerPosition();
-                playerPos = new THREE.Vector3(p.x, p.y, p.z);
-            } else if (world.player && world.player.position) {
-                const p = world.player.position;
-                playerPos = new THREE.Vector3(p.x, p.y, p.z);
-            } else if (world.camera && world.camera.position) {
-                const p = world.camera.position;
-                playerPos = new THREE.Vector3(p.x, p.y, p.z);
-            }
-        }
-
-        // Centro del chunk en coordenadas de bloque/espacio
-        const chunkCenter = new THREE.Vector3(
-            this.x * Chunk.SIZE + Chunk.SIZE / 2,
-            this.y * Chunk.HEIGHT + Chunk.HEIGHT / 2,
-            this.z * Chunk.SIZE + Chunk.SIZE / 2
-        );
-
-        // Si no tenemos playerPos asumimos LOD detallado (evita usar greedy por defecto)
-        const distance = playerPos ? chunkCenter.distanceTo(playerPos) : 0;
-        const useGreedy = playerPos ? (distance >= Chunk.GREEDY_DISTANCE_BLOCKS) : false;
-
-        // Si usamos greedy llamamos al mesher especializado (que puede consultar world para vecinos)
-        if (useGreedy) {
+        // Ruta para generación de geometría 'greedy'
+        if (mode === 'greedy') {
             const geometry = GreedyMesher.generateMesh(this, world);
             if (!geometry) {
                 this.mesh = null;
@@ -306,22 +280,14 @@ export class Chunk {
             }
         }
         
-        // Crear la geometría final
+        // Crear la geometría detallada
         let geometry: THREE.BufferGeometry | null = null;
-        if (levelOfDetail === 'simple') {
-            // Usar el greedy mesher directamente para chunks lejanos
-            geometry = GreedyMesher.generateMesh(this);
-        } else {
-            // Usar el mesh detallado construido arriba
-            if (positions.length > 0) {
-                geometry = new THREE.BufferGeometry();
-                geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-                geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-                geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-                geometry.setIndex(indices);
-            } else {
-                geometry = null;
-            }
+        if (positions.length > 0) {
+            geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+            geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+            geometry.setIndex(indices);
         }
 
         // Crear material y mesh si hay geometría válida (ya sea simple o detallada)

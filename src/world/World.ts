@@ -60,8 +60,8 @@ export class World {
 
                 const chunk = this.generateChunk(chunkX, 0, chunkZ);
                 const distance = Math.sqrt(x*x + z*z);
-                const levelOfDetail = distance <= this.detailedViewDistance ? 'detailed' : 'simple';
-                this.addChunkToScene(chunk, levelOfDetail);
+                const mode = distance <= this.detailedViewDistance ? 'detailed' : 'greedy';
+                this.addChunkToScene(chunk, mode);
             }
         }
     }
@@ -80,8 +80,8 @@ export class World {
         if (!this.scene) return;
         for (const chunk of this.chunks.values()) {
             const mesh = this.chunkMeshes.get(this.getChunkKey(chunk.x, chunk.y, chunk.z));
-            const levelOfDetail = mesh?.userData.levelOfDetail || 'detailed';
-            this.addChunkToScene(chunk, levelOfDetail);
+            const mode = mesh?.userData.mode || 'detailed';
+            this.addChunkToScene(chunk, mode);
         }
     }
 
@@ -194,15 +194,15 @@ export class World {
         return Array.from(this.chunks.values());
     }
     
-    private addChunkToScene(chunk: Chunk, levelOfDetail: 'detailed' | 'simple'): void {
+    private addChunkToScene(chunk: Chunk, mode: 'detailed' | 'greedy'): void {
         if (!this.scene) return;
         const chunkKey = this.getChunkKey(chunk.x, chunk.y, chunk.z);
         
         this.removeChunkFromScene(chunk.x, chunk.y, chunk.z); // Remove old mesh if it exists
 
-        const mesh = chunk.getMesh(levelOfDetail, this);
+        const mesh = chunk.getMesh(mode, this);
         if (mesh) {
-            mesh.userData.levelOfDetail = levelOfDetail;
+            mesh.userData.mode = mode;
             this.chunkMeshes.set(chunkKey, mesh);
             this.scene.add(mesh);
             if (this.debugManager) {
@@ -249,15 +249,15 @@ export class World {
                 requiredChunks.add(chunkKey);
 
                 const distance = Math.sqrt(x*x + z*z);
-                const levelOfDetail = distance <= this.detailedViewDistance ? 'detailed' : 'simple';
+                const mode = distance <= this.detailedViewDistance ? 'detailed' : 'greedy';
 
                 const existingMesh = this.chunkMeshes.get(chunkKey);
                 if (!existingMesh) {
                     const chunk = this.generateChunk(chunkX, 0, chunkZ);
-                    this.addChunkToScene(chunk, levelOfDetail);
-                } else if (existingMesh.userData.levelOfDetail !== levelOfDetail) {
+                    this.addChunkToScene(chunk, mode);
+                } else if (existingMesh.userData.mode !== mode) {
                     const chunk = this.chunks.get(chunkKey)!;
-                    this.addChunkToScene(chunk, levelOfDetail);
+                    this.addChunkToScene(chunk, mode);
                 }
             }
         }
@@ -274,8 +274,8 @@ export class World {
         for (const chunk of this.chunks.values()) {
             if (chunk.isDirty) {
                 const mesh = this.chunkMeshes.get(this.getChunkKey(chunk.x, chunk.y, chunk.z));
-                const levelOfDetail = mesh?.userData.levelOfDetail || 'detailed';
-                this.addChunkToScene(chunk, levelOfDetail);
+                const mode = mesh?.userData.mode || 'detailed';
+                this.addChunkToScene(chunk, mode);
                 chunk.isDirty = false;
             }
         }
