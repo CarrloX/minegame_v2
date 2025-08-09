@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { Chunk } from './Chunk';
 import { BlockType } from './BlockType';
 import { DebugManager } from '../debug/DebugManager';
+import { ChunkQueue } from './ChunkQueue';
+import { WorkerManager } from '../workers/WorkerManager';
 
 /**
  * Represents the game world containing chunks of blocks
@@ -22,9 +24,29 @@ export class World {
     private scene: THREE.Scene | null = null;
     private debugManager: DebugManager | null = null;
     
-    // Texture loader and atlas
+    // Texture loader for loading block textures
     private textureLoader: THREE.TextureLoader;
     private textureAtlas: THREE.Texture | null = null;
+    private sharedMaterial: THREE.MeshBasicMaterial | null = null;
+    private debugMaterial: THREE.MeshBasicMaterial | null = null;
+    
+    // Chunk generation queue for async processing
+    private chunkQueue: ChunkQueue;
+    
+    // Worker manager for async mesh generation
+    private workerManager: WorkerManager;
+    
+    // Material settings
+    private readonly materialSettings = {
+        map: null as THREE.Texture | null,
+        side: THREE.FrontSide,
+        color: 0xFFFFFF,
+        fog: false,
+        toneMapped: false,
+        transparent: true,
+        alphaTest: 0.1,
+        wireframe: false
+    };
     
     /**
      * Creates a new World instance
@@ -33,6 +55,12 @@ export class World {
         // Initialize texture loader
         this.textureLoader = new THREE.TextureLoader();
         
+        // Initialize chunk queue
+        this.chunkQueue = new ChunkQueue(this);
+        
+        // Initialize worker manager
+        this.workerManager = WorkerManager.getInstance();
+        
         // Load the texture atlas
         this.loadTextureAtlas();
     }
@@ -40,10 +68,28 @@ export class World {
     /**
      * Loads the texture atlas
      */
+    /**
+     * Loads the texture atlas and initializes shared materials
+     */
     private loadTextureAtlas(): void {
+        // Load texture atlas
         this.textureAtlas = this.textureLoader.load('/assets/textures/atlas.png');
         this.textureAtlas.magFilter = THREE.NearestFilter;
         this.textureAtlas.minFilter = THREE.NearestFilter;
+        this.textureAtlas.generateMipmaps = false;
+        this.textureAtlas.anisotropy = 1;
+        this.textureAtlas.wrapS = THREE.ClampToEdgeWrapping;
+        this.textureAtlas.wrapT = THREE.ClampToEdgeWrapping;
+        this.textureAtlas.premultiplyAlpha = false;
+
+        // Create shared material with the loaded texture
+        this.materialSettings.map = this.textureAtlas;
+        this.sharedMaterial = new THREE.MeshBasicMaterial(this.materialSettings);
+        
+        // Create debug material (wireframe)
+        this.debugMaterial = this.sharedMaterial.clone();
+        this.debugMaterial.wireframe = true;
+        this.debugMaterial.wireframeLinewidth = 1;
     }
     
     /**
@@ -85,11 +131,20 @@ export class World {
         }
     }
 
+    /**
+     * Removes and disposes of all chunk meshes from the scene
+     */
     private removeAllMeshes(): void {
         if (!this.scene) return;
-        for (const mesh of this.chunkMeshes.values()) {
-            this.scene.remove(mesh);
+        
+        // Create a copy of the keys to avoid modification during iteration
+        const chunkKeys = Array.from(this.chunkMeshes.keys());
+        
+        for (const key of chunkKeys) {
+            const [x, y, z] = key.split(',').map(Number);
+            this.removeChunkFromScene(x, y, z);
         }
+        
         this.chunkMeshes.clear();
     }
     
@@ -132,16 +187,52 @@ export class World {
         return this.getChunk(chunkX, chunkY, chunkZ) || this.generateChunk(chunkX, chunkY, chunkZ);
     }
     
+    /**
+     * Gets the highest non-air block at the given world coordinates (x,z)
+     * @param x World X coordinate
+     * @param z World Z coordinate
+     * @returns The Y coordinate of the highest non-air block + 1, or 0 if no blocks found
+     */
     public getHighestBlockY(x: number, z: number): number {
-        for (let y = Chunk.HEIGHT - 1; y >= 0; y--) {
-            if (this.getBlock(x, y, z) !== BlockType.AIR) {
-                return y + 1;
+        // Get all chunk Y coordinates that exist in the world
+        const chunkYCoords = new Set<number>();
+        for (const key of this.chunks.keys()) {
+            const [chunkX, chunkY, chunkZ] = key.split(',').map(Number);
+            if (Math.floor(x / Chunk.SIZE) === chunkX && Math.floor(z / Chunk.SIZE) === chunkZ) {
+                chunkYCoords.add(chunkY);
             }
         }
-        return 0;
+
+        // If no chunks found at this (x,z), return 0
+        if (chunkYCoords.size === 0) {
+            return 0;
+        }
+
+        // Sort chunk Y coordinates in descending order
+        const sortedChunkYs = Array.from(chunkYCoords).sort((a, b) => b - a);
+
+        // Check chunks from top to bottom
+        for (const chunkY of sortedChunkYs) {
+            const startY = (chunkY === sortedChunkYs[0]) ? Chunk.HEIGHT - 1 : Chunk.HEIGHT - 1;
+            const endY = 0;
+            const step = -1;
+            
+            for (let y = startY; y >= endY; y += step) {
+                const worldY = chunkY * Chunk.HEIGHT + y;
+                if (this.getBlock(x, worldY, z) !== BlockType.AIR) {
+                    return worldY + 1; // +1 because we want the block above
+                }
+            }
+        }
+
+        return 0; // No solid blocks found
     }
 
-    public getBlock(x: number, y: number, z: number): BlockType {
+    /**
+     * Gets the block at the specified world coordinates
+     * This is used by the worker to query neighboring chunks
+     */
+    public getBlock(x: number, y: number, z: number): BlockType | undefined {
         const chunkX = Math.floor(x / Chunk.SIZE);
         const chunkY = Math.floor(y / Chunk.HEIGHT);
         const chunkZ = Math.floor(z / Chunk.SIZE);
@@ -194,30 +285,74 @@ export class World {
         return Array.from(this.chunks.values());
     }
     
+    /**
+     * Adds a chunk's mesh to the scene with the specified level of detail
+     * @param chunk The chunk to add to the scene
+     * @param mode The level of detail to use for this chunk
+     */
     private addChunkToScene(chunk: Chunk, mode: 'detailed' | 'greedy'): void {
-        if (!this.scene) return;
+        if (!this.scene || !this.sharedMaterial) return;
         const chunkKey = this.getChunkKey(chunk.x, chunk.y, chunk.z);
         
         this.removeChunkFromScene(chunk.x, chunk.y, chunk.z); // Remove old mesh if it exists
 
-        const mesh = chunk.getMesh(mode, this);
-        if (mesh) {
-            mesh.userData.mode = mode;
-            this.chunkMeshes.set(chunkKey, mesh);
-            this.scene.add(mesh);
-            if (this.debugManager) {
-                this.debugManager.applyWireframeToMesh(chunkKey, mesh);
+        try {
+            // Pass 'this' as the world reference so the chunk can query neighbor blocks
+            const mesh = chunk.getMesh(mode, this);
+            if (mesh) {
+                // Store the LOD mode in the mesh for later reference
+                mesh.userData = mesh.userData || {};
+                mesh.userData.mode = mode;
+                mesh.userData.chunkX = chunk.x;
+                mesh.userData.chunkY = chunk.y;
+                mesh.userData.chunkZ = chunk.z;
+                
+                // Apply the shared material
+                const material = this.getMaterial();
+                if (material) {
+                    mesh.material = material;
+                    this.chunkMeshes.set(chunkKey, mesh);
+                    this.scene.add(mesh);
+                } else {
+                    console.warn(`Failed to get material for chunk ${chunkKey}`);
+                    return;
+                }
+                
+                // Apply debug visualization if debug manager is available
+                if (this.debugManager) {
+                    this.debugManager.applyWireframeToMesh(chunkKey, mesh);
+                }
             }
+        } catch (error) {
+            console.error(`Error generating mesh for chunk ${chunkKey}:`, error);
         }
     }
     
+    /**
+     * Removes a chunk's mesh from the scene and disposes of its resources
+     * @param chunkX Chunk X coordinate
+     * @param chunkY Chunk Y coordinate
+     * @param chunkZ Chunk Z coordinate
+     */
     private removeChunkFromScene(chunkX: number, chunkY: number, chunkZ: number): void {
         if (!this.scene) return;
         const chunkKey = this.getChunkKey(chunkX, chunkY, chunkZ);
         const mesh = this.chunkMeshes.get(chunkKey);
         if (mesh) {
+            // Remove from scene and map
             this.scene.remove(mesh);
             this.chunkMeshes.delete(chunkKey);
+            
+            // Dispose of geometry and materials
+            if (mesh.geometry) {
+                mesh.geometry.dispose();
+            }
+            
+            if (Array.isArray(mesh.material)) {
+                mesh.material.forEach(material => material.dispose());
+            } else if (mesh.material) {
+                mesh.material.dispose();
+            }
         }
     }
     
@@ -226,21 +361,47 @@ export class World {
         this.updateDirtyChunks();
     }
 
+    /**
+     * Unloads a chunk, disposing of all its resources
+     * @param chunkX Chunk X coordinate
+     * @param chunkY Chunk Y coordinate
+     * @param chunkZ Chunk Z coordinate
+     */
     private unloadChunk(chunkX: number, chunkY: number, chunkZ: number): void {
         const chunkKey = this.getChunkKey(chunkX, chunkY, chunkZ);
         const chunk = this.chunks.get(chunkKey);
-        if (chunk) {
-            this.removeChunkFromScene(chunkX, chunkY, chunkZ);
-            chunk.dispose();
-            this.chunks.delete(chunkKey);
-        }
+        if (!chunk) return;
+
+        // Remove from scene and clean up mesh resources
+        this.removeChunkFromScene(chunkX, chunkY, chunkZ);
+        
+        // Clean up chunk resources
+        chunk.dispose();
+        
+        // Remove from chunks map
+        this.chunks.delete(chunkKey);
     }
 
+    /**
+     * Determines the appropriate level of detail for a chunk based on its distance from the player
+     * @param dx X distance from player in chunks
+     * @param dz Z distance from player in chunks
+     * @returns 'detailed' or 'greedy' depending on the distance
+     */
+    private determineLOD(dx: number, dz: number): 'detailed' | 'greedy' {
+        const distance = Math.sqrt(dx*dx + dz*dz);
+        return distance <= this.detailedViewDistance ? 'detailed' : 'greedy';
+    }
+
+    /**
+     * Loads and unloads chunks around the player based on view distance
+     */
     private loadChunksAroundPlayer(playerPosition: THREE.Vector3): void {
         const playerChunkX = Math.floor(playerPosition.x / Chunk.SIZE);
         const playerChunkZ = Math.floor(playerPosition.z / Chunk.SIZE);
         const requiredChunks = new Set<string>();
 
+        // First pass: Update or queue chunks that need to be loaded/updated
         for (let x = -this.viewDistance; x <= this.viewDistance; x++) {
             for (let z = -this.viewDistance; z <= this.viewDistance; z++) {
                 const chunkX = playerChunkX + x;
@@ -248,16 +409,23 @@ export class World {
                 const chunkKey = this.getChunkKey(chunkX, 0, chunkZ);
                 requiredChunks.add(chunkKey);
 
-                const distance = Math.sqrt(x*x + z*z);
-                const mode = distance <= this.detailedViewDistance ? 'detailed' : 'greedy';
+                // Calculate distance from player for priority
+                const distance = Math.sqrt(x * x + z * z);
+                const priority = Math.floor(distance * 10); // Higher priority for closer chunks
+                
+                // Determine LOD based on distance from player
+                const mode = this.determineLOD(x, z);
 
                 const existingMesh = this.chunkMeshes.get(chunkKey);
                 if (!existingMesh) {
-                    const chunk = this.generateChunk(chunkX, 0, chunkZ);
-                    this.addChunkToScene(chunk, mode);
+                    // Queue chunk for generation and meshing
+                    this.chunkQueue.addTask(chunkX, 0, chunkZ, mode, priority);
                 } else if (existingMesh.userData.mode !== mode) {
-                    const chunk = this.chunks.get(chunkKey)!;
-                    this.addChunkToScene(chunk, mode);
+                    // Queue chunk for LOD update with higher priority
+                    const chunk = this.chunks.get(chunkKey);
+                    if (chunk) {
+                        this.chunkQueue.addTask(chunkX, 0, chunkZ, mode, priority - 0.5); // Slightly higher priority than new chunks
+                    }
                 }
             }
         }
@@ -288,9 +456,49 @@ export class World {
         }
     }
     
+    /**
+     * Gets the shared material for chunk meshes
+     */
+    public getMaterial(): THREE.Material | null {
+        return this.sharedMaterial;
+    }
+
+    /**
+     * Gets the worker manager instance
+     */
+    public getWorkerManager(): WorkerManager {
+        return this.workerManager;
+    }
+
     public dispose(): void {
-        this.removeAllMeshes();
+        // Clean up all chunk meshes
+        this.chunkMeshes.forEach(mesh => {
+            mesh.geometry.dispose();
+            // Don't dispose of shared material here
+        });
+        this.chunkMeshes.clear();
+        
+        // Clean up texture atlas
+        if (this.textureAtlas) {
+            this.textureAtlas.dispose();
+            this.textureAtlas = null;
+        }
+        
+        // Clean up materials
+        if (this.sharedMaterial) {
+            this.sharedMaterial.dispose();
+            this.sharedMaterial = null;
+        }
+        
+        if (this.debugMaterial) {
+            this.debugMaterial.dispose();
+            this.debugMaterial = null;
+        }
+        
+        // Clean up worker manager
+        this.workerManager.dispose();
+        
+        // Clear chunks
         this.chunks.clear();
-        this.scene = null;
     }
 }

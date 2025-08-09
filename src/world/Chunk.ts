@@ -14,7 +14,6 @@ export class Chunk {
     // Indexed as [x + z * SIZE + y * SIZE * SIZE]
     private blocks: Uint8Array;
     private mesh: THREE.Mesh | null;
-    private static readonly GREEDY_DISTANCE = 48;
     public isDirty: boolean;
     
     // Chunk position in chunk coordinates (not block coordinates)
@@ -93,7 +92,7 @@ export class Chunk {
     /**
      * Gets the chunk's mesh, creating it if necessary
      */
-    public getMesh(mode: 'detailed' | 'greedy' = 'detailed', world: import('./World').World): THREE.Mesh | null {
+    public getMesh(mode: 'detailed' | 'greedy', world: import('./World').World): THREE.Mesh | null {
         if (this.isDirty) {
             this.updateMesh(mode, world);
         }
@@ -134,6 +133,14 @@ export class Chunk {
 
         // Ruta para generación de geometría 'greedy'
         if (mode === 'greedy') {
+            // Ensure world reference is passed to GreedyMesher for neighbor chunk queries
+            if (!world || typeof world.getBlock !== 'function') {
+                console.warn('World reference not available for greedy meshing');
+                this.mesh = null;
+                this.isDirty = false;
+                return;
+            }
+            
             const geometry = GreedyMesher.generateMesh(this, world);
             if (!geometry) {
                 this.mesh = null;
@@ -141,26 +148,10 @@ export class Chunk {
                 return;
             }
 
-            // Textura / material (reutiliza tu loader - idealmente cachear la textura)
-            const textureLoader = new THREE.TextureLoader();
-            const texture = textureLoader.load('/assets/textures/atlas.png');
-            texture.magFilter = THREE.NearestFilter;
-            texture.minFilter = THREE.NearestFilter;
-            texture.generateMipmaps = false;
-            texture.anisotropy = 1;
-            texture.wrapS = THREE.ClampToEdgeWrapping;
-            texture.wrapT = THREE.ClampToEdgeWrapping;
-            texture.premultiplyAlpha = false;
-
-            const material = new THREE.MeshBasicMaterial({
-                map: texture,
-                side: THREE.FrontSide,
-                color: 0xFFFFFF,
-                fog: false,
-                toneMapped: false,
-                transparent: true,
-                alphaTest: 0.1
-            });
+            // Get shared material from world
+            const material = world.getMaterial && typeof world.getMaterial === 'function' 
+                ? world.getMaterial() 
+                : new THREE.MeshBasicMaterial();
 
             this.mesh = new THREE.Mesh(geometry, material);
             this.mesh.castShadow = true;
