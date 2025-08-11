@@ -2,12 +2,14 @@ import { Renderer } from '../rendering/Renderer';
 import { World } from '../world/World';
 import { Player } from '../player/Player';
 import { DebugManager } from '../debug/DebugManager';
+import { CrosshairManager } from '../ui/CrosshairManager';
 
 export class Game {
     private renderer: Renderer;
     private world: World;
     private player: Player;
     private debugManager: DebugManager;
+    private crosshairManager: CrosshairManager | null = null;
     private isRunning: boolean = false;
     private lastTime: number = 0;
     private animationFrameId: number | null = null;
@@ -25,6 +27,9 @@ export class Game {
         this.debugManager = debugManager;
         
 
+        // Initialize crosshair manager
+        this.initializeCrosshair();
+        
         // Bind the game loop to maintain 'this' context
         this.gameLoop = this.gameLoop.bind(this);
     }
@@ -86,6 +91,11 @@ export class Game {
             // Render the scene
             this.renderer.render();
             
+            // Update crosshair (debe ir después de renderizar la escena)
+            if (this.crosshairManager) {
+                this.crosshairManager.update();
+            }
+            
             // Continue the game loop
             this.animationFrameId = requestAnimationFrame(this.gameLoop);
         } catch (error) {
@@ -115,6 +125,39 @@ export class Game {
     }
     
     /**
+     * Initializes the crosshair manager
+     */
+    private initializeCrosshair(): void {
+        try {
+            const renderer = this.renderer.getRenderer();
+            const scene = this.renderer.getScene();
+            const camera = this.renderer.getCamera();
+            
+            this.crosshairManager = new CrosshairManager(renderer, scene, camera, {
+                mode: 'accurate',
+                sampleInterval: 20,
+                sampleSize: 8,
+                smoothing: 0.25,
+                threshold: 0.55,
+                onColorChange: (isLight, brightness) => {
+                    const root = document.documentElement;
+                    if (isLight) {
+                        root.style.setProperty('--crosshair-color', 'rgba(0, 0, 0, 0.8)');
+                        root.style.setProperty('--crosshair-border', 'rgba(255, 255, 255, 0.5)');
+                    } else {
+                        root.style.setProperty('--crosshair-color', 'rgba(255, 255, 255, 0.8)');
+                        root.style.setProperty('--crosshair-border', 'rgba(0, 0, 0, 0.5)');
+                    }
+                }
+            });
+            
+            console.log('CrosshairManager initialized');
+        } catch (error) {
+            console.error('Failed to initialize CrosshairManager:', error);
+        }
+    }
+    
+    /**
      * Disposes of game resources
      */
     public dispose(): void {
@@ -122,9 +165,15 @@ export class Game {
         this.stop();
         
         // Dispose of resources
-        this.player.dispose();
         this.world.dispose();
         this.renderer.dispose();
+        
+        // Limpiar el CrosshairManager si existe
+        if (this.crosshairManager) {
+            this.crosshairManager.dispose();
+            this.crosshairManager = null;
+        }
+        
         this.debugManager.dispose();
     }
 }
