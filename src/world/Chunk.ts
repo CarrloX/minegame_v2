@@ -161,9 +161,9 @@ export class Chunk {
             // Para chunks greedy, no multiplicar y por HEIGHT para mantener la alineación correcta
             this.mesh.position.set(
                 this.x * Chunk.SIZE,
-                this.y,  // No multiplicar por HEIGHT para chunks greedy
+                this.y * Chunk.HEIGHT,
                 this.z * Chunk.SIZE
-            );
+            );            
 
             this.isDirty = false;
             return;
