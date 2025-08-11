@@ -3,6 +3,26 @@ import { BlockType } from './BlockType';
 import { TextureAtlas } from './TextureAtlas';
 import { WorkerManager, type MeshData } from '../workers/WorkerManager';
 
+/**
+ * Minimal interface for world objects that can be used for block queries
+ */
+export interface WorldLike {
+    /**
+     * Gets the block type at the specified world coordinates
+     * @param x World X coordinate
+     * @param y World Y coordinate
+     * @param z World Z coordinate
+     * @returns The type of block at the specified coordinates, or undefined if out of bounds
+     */
+    getBlock(x: number, y: number, z: number): BlockType | undefined;
+    
+    /**
+     * Gets the shared material for chunk meshes
+     * @param debug Optional flag to get the debug wireframe material
+     * @returns The shared material or null if not loaded yet
+     */
+    getMaterial(debug?: boolean): THREE.Material | null;
+}
 
 /**
  * Represents a 16x16x16 chunk of blocks in the world
@@ -57,6 +77,11 @@ export class Chunk {
     
     /**
      * Converts 3D chunk coordinates to flat array index
+     * @param x - X coordinate within chunk (0 to Chunk.SIZE-1)
+     * @param y - Y coordinate within chunk (0 to Chunk.HEIGHT-1)
+     * @param z - Z coordinate within chunk (0 to Chunk.SIZE-1)
+     * @returns The index in the flat blocks array for the given coordinates
+     * @throws {Error} If coordinates are out of chunk bounds
      */
     private getIndex(x: number, y: number, z: number): number {
         if (x < 0 || x >= Chunk.SIZE || y < 0 || y >= Chunk.HEIGHT || z < 0 || z >= Chunk.SIZE) {
@@ -66,38 +91,69 @@ export class Chunk {
     }
     
     /**
-     * Gets the block type at the specified local chunk coordinates
-     * Returns BlockType.AIR if coordinates are out of bounds
+     * Gets the block type at the specified local chunk coordinates.
+     * This method is safe to call with any coordinates - it will return BlockType.AIR
+     * for coordinates outside the chunk bounds.
+     *
+     * @param x - X coordinate within the chunk (0 to Chunk.SIZE-1)
+     * @param y - Y coordinate within the chunk (0 to Chunk.HEIGHT-1)
+     * @param z - Z coordinate within the chunk (0 to Chunk.SIZE-1)
+     * @returns The type of block at the specified coordinates, or BlockType.AIR if out of bounds
      */
     public getBlock(x: number, y: number, z: number): BlockType {
-        // Check bounds first to handle out-of-bounds gracefully
-        if (x < 0 || x >= Chunk.SIZE || 
-            y < 0 || y >= Chunk.HEIGHT || 
-            z < 0 || z >= Chunk.SIZE) {
+        if (x < 0 || x >= Chunk.SIZE || y < 0 || y >= Chunk.HEIGHT || z < 0 || z >= Chunk.SIZE) {
             return BlockType.AIR;
         }
         return this.blocks[this.getIndex(x, y, z)];
     }
     
     /**
-     * Sets the block type at the specified local chunk coordinates
+     * Sets the block type at the specified local chunk coordinates.
+     * If the coordinates are out of bounds, this method does nothing.
+     * Automatically marks the chunk as dirty if the block type changes.
+     *
+     * @param x - X coordinate within the chunk (0 to Chunk.SIZE-1)
+     * @param y - Y coordinate within the chunk (0 to Chunk.HEIGHT-1)
+     * @param z - Z coordinate within the chunk (0 to Chunk.SIZE-1)
+     * @param blockType - The type of block to set at the specified coordinates
+     * @returns {void}
      */
     public setBlock(x: number, y: number, z: number, blockType: BlockType): void {
+        if (x < 0 || x >= Chunk.SIZE || y < 0 || y >= Chunk.HEIGHT || z < 0 || z >= Chunk.SIZE) {
+            return; // Out of bounds
+        }
+
         const index = this.getIndex(x, y, z);
-        const currentBlock = this.blocks[index];
+        const oldBlockType = this.blocks[index];
+        
+        // Skip if no change
+        if (oldBlockType === blockType) return;
         
         // Update non-air count
-        if (currentBlock === BlockType.AIR && blockType !== BlockType.AIR) {
+        if (oldBlockType === BlockType.AIR) {
             this.nonAirCount++;
-        } else if (currentBlock !== BlockType.AIR && blockType === BlockType.AIR) {
+        } else if (blockType === BlockType.AIR) {
             this.nonAirCount--;
         }
         
         this.blocks[index] = blockType;
+        this.isDirty = true;
     }
     
     /**
-     * Fills a 3D region within the chunk with a specific block type
+     * Fills a 3D region within the chunk with a specific block type.
+     * The region is defined by two corner points (x1,y1,z1) and (x2,y2,z2).
+     * The coordinates will be automatically ordered to ensure the fill works regardless
+     * of which corner is specified first.
+     *
+     * @param x1 - First X coordinate of the region
+     * @param y1 - First Y coordinate of the region
+     * @param z1 - First Z coordinate of the region
+     * @param x2 - Second X coordinate of the region
+     * @param y2 - Second Y coordinate of the region
+     * @param z2 - Second Z coordinate of the region
+     * @param blockType - The type of block to fill the region with
+     * @returns {void}
      */
     public fill(
         x1: number, y1: number, z1: number,
@@ -154,9 +210,6 @@ export class Chunk {
         }
     }
     
-    /**
-     * Checks if the chunk is empty (contains only air blocks)
-     */
     /**
      * Checks if the chunk is empty (contains only air blocks)
      * Optimized to O(1) using nonAirCount
@@ -297,8 +350,10 @@ export class Chunk {
     
     /**
      * Updates the chunk's mesh based on its block data using simple face culling
+     * @param mode The level of detail to use for mesh generation
+     * @param world The world instance for querying neighboring blocks
      */
-    private updateMesh(mode: 'detailed' | 'greedy', world: any): void {
+    private updateMesh(mode: 'detailed' | 'greedy', world: WorldLike): void {
         // Skip if chunk is empty
         if (this.isEmpty()) {
             if (this.mesh) {
@@ -332,7 +387,7 @@ export class Chunk {
             if (!this.mesh) {
                 this.mesh = new THREE.Mesh(
                     new THREE.BufferGeometry(),
-                    material
+                    material as THREE.Material
                 );
                 this.mesh.userData = { 
                     mode: 'greedy',
@@ -356,7 +411,12 @@ export class Chunk {
                             (this.mesh.material as THREE.Material).dispose();
                         }
                     }
-                    this.mesh.material = material;
+                    if (material !== null) {
+                        this.mesh.material = material;
+                    } else {
+                        console.warn('Cannot set null material on mesh');
+                        this.mesh.visible = false;
+                    }
                 }
                 this.mesh.userData.ownedMaterial = ownedMaterial;
                 this.mesh.visible = true;
@@ -697,11 +757,15 @@ export class Chunk {
         }
 
         // Get or create material
-        let material: THREE.Material;
+        let material: THREE.Material | null = null;
         let ownedMaterial = false;
         
         if (world.getMaterial) {
             material = world.getMaterial();
+            if (!material) {
+                console.error('Failed to get material from world');
+                return;
+            }
             ownedMaterial = false;
         } else {
             // Fallback material if world doesn't provide one
