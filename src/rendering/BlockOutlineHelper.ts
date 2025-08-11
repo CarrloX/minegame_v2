@@ -2,224 +2,219 @@ import * as THREE from 'three';
 import { World } from '../world/World';
 import { BlockType } from '../world/BlockType';
 
-export interface HighlightedBlock {
-    position: THREE.Vector3;
-    originalType: BlockType;
-}
-
 export class BlockOutlineHelper {
-    private scene: THREE.Scene;
-    private world: World;
-    private highlightBox: THREE.Group | null = null;
-    private highlightEdges: THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial>[] = [];
+  private scene: THREE.Scene;
+  private world: World;
 
-    constructor(scene: THREE.Scene, world: World) {
-        this.scene = scene;
-        this.world = world;
-        this.initializeHighlightBox();
+  private highlightBox: THREE.Group | null = null;
+  private faceGroups: THREE.Group[] = []; // 6 groups, one per face
+  private edgeMaterial: THREE.LineBasicMaterial;
+  private size = 0.5; // exact half-block
+
+  // Configurables
+  private ignoredBlockTypes: Set<number> = new Set();            // si el bloque objetivo está en este set => no dibujar
+  private transparentNeighborTypes: Set<number> = new Set();     // si el vecino está en este set => tratar como AIR al decidir visibilidad
+
+  public onHighlightChange?: (pos: THREE.Vector3 | null) => void;
+
+  constructor(scene: THREE.Scene, world: World, color = 0x000000) {
+    this.scene = scene;
+    this.world = world;
+    this.edgeMaterial = new THREE.LineBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.95,
+      depthTest: false,
+      depthWrite: false,
+      toneMapped: false
+    });
+
+    this.initializeHighlightBox();
+  }
+
+  // -------------------
+  // API de configuración
+  // -------------------
+  /** Ignorar por completo un tipo de bloque (no dibujar outline sobre él) */
+  public addIgnoredBlockType(type: BlockType): void {
+    this.ignoredBlockTypes.add(type);
+  }
+  public removeIgnoredBlockType(type: BlockType): void {
+    this.ignoredBlockTypes.delete(type);
+  }
+  public clearIgnoredBlockTypes(): void {
+    this.ignoredBlockTypes.clear();
+  }
+  public setIgnoredBlockTypes(types: BlockType[]): void {
+    this.ignoredBlockTypes = new Set(types);
+  }
+
+  /** Tratar el tipo de vecino como transparente (equivalente a AIR) para decidir visibilidad de caras */
+  public addTransparentNeighborType(type: BlockType): void {
+    this.transparentNeighborTypes.add(type);
+  }
+  public removeTransparentNeighborType(type: BlockType): void {
+    this.transparentNeighborTypes.delete(type);
+  }
+  public clearTransparentNeighborTypes(): void {
+    this.transparentNeighborTypes.clear();
+  }
+  public setTransparentNeighborTypes(types: BlockType[]): void {
+    this.transparentNeighborTypes = new Set(types);
+  }
+
+  // -------------------
+  // Inicialización
+  // -------------------
+  private initializeHighlightBox(): void {
+    this.highlightBox = new THREE.Group();
+    this.highlightBox.visible = false;
+    this.highlightBox.renderOrder = 9999; // dibujar encima
+    this.highlightBox.visible = false;
+
+    const s = this.size;
+    const corners = [
+      new THREE.Vector3(-s, -s, -s), // 0
+      new THREE.Vector3( s, -s, -s), // 1
+      new THREE.Vector3( s, -s,  s), // 2
+      new THREE.Vector3(-s, -s,  s), // 3
+      new THREE.Vector3(-s,  s, -s), // 4
+      new THREE.Vector3( s,  s, -s), // 5
+      new THREE.Vector3( s,  s,  s), // 6
+      new THREE.Vector3(-s,  s,  s)  // 7
+    ];
+
+    // Coincide con los checks que usaremos en update (ver abajo)
+    const faceCornerIndices: number[][] = [
+      [0,1,2,3], // bottom (y-)
+      [7,6,5,4], // top (y+)
+      [0,3,7,4], // left (x-)
+      [1,5,6,2], // right (x+)
+      [3,2,6,7], // front (z+)
+      [0,4,5,1]  // back (z-)
+    ];
+
+    this.faceGroups = [];
+    for (let f = 0; f < faceCornerIndices.length; f++) {
+      const group = new THREE.Group();
+      const idx = faceCornerIndices[f];
+      for (let i = 0; i < 4; i++) {
+        const a = corners[idx[i]];
+        const b = corners[idx[(i + 1) % 4]];
+        const geo = new THREE.BufferGeometry().setFromPoints([a.clone(), b.clone()]);
+        const line = new THREE.Line(geo, this.edgeMaterial);
+        group.add(line);
+      }
+      group.visible = false;
+      this.faceGroups.push(group);
+      this.highlightBox.add(group);
     }
 
-    /**
-     * Inicializa el contorno del bloque
-     */
-    private initializeHighlightBox(): void {
-        try {
-            console.log('Initializing highlight box...');
-            
-            // Crear un grupo para contener los bordes visibles
-            this.highlightBox = new THREE.Group();
-            this.highlightBox.visible = false;
-            
-            // Crear materiales para los bordes
-            const edgeMaterial = new THREE.LineBasicMaterial({ 
-                color: 0x000000, // Color negro
-                linewidth: 2,    // Grosor de la línea
-                transparent: true,
-                opacity: 0.9,    // Ligeramente transparente
-                depthTest: false,
-                polygonOffset: true,
-                polygonOffsetFactor: 1,
-                polygonOffsetUnits: 1
-            });
-            
-            // Crear geometrías para cada borde del cubo
-            const size = 0.501; // Mitad del tamaño del bloque + un pequeño offset
-            
-            // Función para crear un borde entre dos puntos
-            const createEdge = (start: THREE.Vector3, end: THREE.Vector3) => {
-                const geometry = new THREE.BufferGeometry().setFromPoints([start, end]);
-                return new THREE.Line(geometry, edgeMaterial);
-            };
-            
-            // Crear los 12 bordes del cubo
-            const edges = [
-                // Bordes inferiores (y = -size)
-                createEdge(
-                    new THREE.Vector3(-size, -size, -size),
-                    new THREE.Vector3(size, -size, -size)
-                ),
-                createEdge(
-                    new THREE.Vector3(size, -size, -size),
-                    new THREE.Vector3(size, -size, size)
-                ),
-                createEdge(
-                    new THREE.Vector3(size, -size, size),
-                    new THREE.Vector3(-size, -size, size)
-                ),
-                createEdge(
-                    new THREE.Vector3(-size, -size, size),
-                    new THREE.Vector3(-size, -size, -size)
-                ),
-                // Bordes superiores (y = size)
-                createEdge(
-                    new THREE.Vector3(-size, size, -size),
-                    new THREE.Vector3(size, size, -size)
-                ),
-                createEdge(
-                    new THREE.Vector3(size, size, -size),
-                    new THREE.Vector3(size, size, size)
-                ),
-                createEdge(
-                    new THREE.Vector3(size, size, size),
-                    new THREE.Vector3(-size, size, size)
-                ),
-                createEdge(
-                    new THREE.Vector3(-size, size, size),
-                    new THREE.Vector3(-size, size, -size)
-                ),
-                // Bordes verticales
-                createEdge(
-                    new THREE.Vector3(-size, -size, -size),
-                    new THREE.Vector3(-size, size, -size)
-                ),
-                createEdge(
-                    new THREE.Vector3(size, -size, -size),
-                    new THREE.Vector3(size, size, -size)
-                ),
-                createEdge(
-                    new THREE.Vector3(size, -size, size),
-                    new THREE.Vector3(size, size, size)
-                ),
-                createEdge(
-                    new THREE.Vector3(-size, -size, size),
-                    new THREE.Vector3(-size, size, size)
-                )
-            ];
-            
-            // Almacenar referencias a los bordes para su manipulación posterior
-            this.highlightEdges = edges;
-            
-            // Añadir todos los bordes al grupo
-            edges.forEach(edge => this.highlightBox?.add(edge));
-            
-            // Añadir el grupo a la escena
-            this.scene.add(this.highlightBox);
-            
-            console.log('BlockOutlineHelper initialized with', edges.length, 'edges');
-        } catch (error) {
-            console.error('Error initializing BlockOutlineHelper:', error);
-        }
+    this.scene.add(this.highlightBox);
+  }
+
+  // -------------------
+  // Lógica principal
+  // -------------------
+  /**
+   * Actualiza el contorno. Si position === null oculta el helper.
+   * position: punto en el mundo (puede ser coordenadas flotantes), se hace snap a entero.
+   */
+  public updateHighlightBox(position: THREE.Vector3 | null): void {
+    if (!this.highlightBox) return;
+
+    if (!position) {
+      this.highlightBox.visible = false;
+      this.onHighlightChange?.(null);
+      return;
     }
 
-    /**
-     * Actualiza la posición y visibilidad del contorno del bloque
-     * @param position Posición del bloque a resaltar, o null para ocultar el contorno
-     */
-    public updateHighlightBox(position: THREE.Vector3 | null): void {
-        if (!this.highlightBox || !this.highlightEdges.length) {
-            console.warn('BlockOutlineHelper not properly initialized');
-            return;
-        }
-        
-        if (!position) {
-            this.highlightBox.visible = false;
-            return;
-        }
-        
-        const blockX = Math.floor(position.x);
-        const blockY = Math.floor(position.y);
-        const blockZ = Math.floor(position.z);
-        const centerX = blockX + 0.5;
-        const centerY = blockY + 0.5;
-        const centerZ = blockZ + 0.5;
-        
-        // Posicionar el grupo de bordes en el centro del bloque
-        this.highlightBox.position.set(centerX, centerY, centerZ);
-        
-        // Verificar qué caras del bloque son visibles
-        const isFaceVisible = (dx: number, dy: number, dz: number): boolean => {
-            const checkX = blockX + dx;
-            const checkY = blockY + dy;
-            const checkZ = blockZ + dz;
-            
-            // Verificar si hay un bloque en la dirección opuesta a la normal de la cara
-            const block = this.world.getBlock(checkX, checkY, checkZ);
-            return block === BlockType.AIR || block === undefined;
-        };
-        
-        // Definir qué bordes pertenecen a cada cara
-        const faceEdges = [
-            [0, 1, 2, 3],   // Cara inferior (Y-)
-            [4, 5, 6, 7],   // Cara superior (Y+)
-            [0, 4, 8, 9],   // Cara frontal (Z-)
-            [2, 6, 10, 11], // Cara trasera (Z+)
-            [0, 2, 4, 6],   // Cara izquierda (X-)
-            [1, 3, 5, 7]    // Cara derecha (X+)
-        ];
-        
-        // Normales para cada cara (X, Y, Z)
-        const faceNormals = [
-            [0, -1, 0],  // Abajo
-            [0, 1, 0],   // Arriba
-            [0, 0, -1],  // Frente
-            [0, 0, 1],   // Atrás
-            [-1, 0, 0],  // Izquierda
-            [1, 0, 0]    // Derecha
-        ];
-        
-        // Determinar qué caras son visibles
-        const visibleFaces = faceNormals.map(([dx, dy, dz], i) => {
-            return isFaceVisible(dx, dy, dz) ? i : -1;
-        }).filter(i => i !== -1);
-        
-        // Determinar qué bordes son visibles (sin duplicados)
-        const visibleEdges = new Set<number>();
-        visibleFaces.forEach(faceIdx => {
-            faceEdges[faceIdx].forEach(edgeIdx => visibleEdges.add(edgeIdx));
-        });
-        
-        // Actualizar visibilidad de cada borde
-        this.highlightEdges.forEach((edge, index) => {
-            edge.visible = visibleEdges.has(index);
-        });
-        
-        // Mostrar el grupo de bordes
-        this.highlightBox.visible = true;
-        this.highlightBox.updateMatrix();
-        this.highlightBox.updateMatrixWorld(true);
+    const blockX = Math.floor(position.x);
+    const blockY = Math.floor(position.y);
+    const blockZ = Math.floor(position.z);
+
+    // Si el bloque objetivo está en la lista de ignorados => ocultar
+    const targetType = this.world.getBlock(blockX, blockY, blockZ);
+    if (targetType !== undefined && this.ignoredBlockTypes.has(targetType)) {
+      this.highlightBox.visible = false;
+      this.onHighlightChange?.(null);
+      return;
     }
 
-    /**
-     * Limpia los recursos utilizados por el helper
-     */
-    public dispose(): void {
-        if (this.highlightBox) {
-            // Eliminar bordes de la escena
-            this.highlightBox.clear();
-            this.scene.remove(this.highlightBox);
-            
-            // Liberar recursos de los bordes
-            this.highlightEdges.forEach(edge => {
-                edge.geometry.dispose();
-                if (Array.isArray(edge.material)) {
-                    edge.material.forEach(material => material.dispose());
-                } else {
-                    edge.material.dispose();
-                }
-            });
-            
-            this.highlightEdges = [];
-            this.highlightBox = null;
-        }
+    // Posicionar en el centro del bloque
+    this.highlightBox.position.set(blockX + 0.5, blockY + 0.5, blockZ + 0.5);
+
+    // Helper para decidir si un vecino se considera "vacío" a efectos del outline
+    const neighborIsEmptyForOutline = (nx: number, ny: number, nz: number): boolean => {
+      const neighbor = this.world.getBlock(nx, ny, nz);
+      // undefined o AIR se consideran vacíos
+      if (neighbor === undefined || neighbor === BlockType.AIR) return true;
+      // Si el vecino está en transparentNeighborTypes, también consideramos vacío
+      if (this.transparentNeighborTypes.has(neighbor)) return true;
+      // en otro caso, es sólido
+      return false;
+    };
+
+    // Orden de checks debe corresponder con faceGroups:
+    // bottom, top, left, right, front, back
+    const faceChecks: [number, number, number][] = [
+      [0,-1,0], // bottom (y-)
+      [0, 1,0], // top    (y+)
+      [-1,0,0], // left   (x-)
+      [1, 0,0], // right  (x+)
+      [0, 0, 1],// front  (z+)
+      [0, 0,-1] // back   (z-)
+    ];
+
+    let anyVisible = false;
+    for (let f = 0; f < this.faceGroups.length; f++) {
+      const [dx, dy, dz] = faceChecks[f];
+      const nx = blockX + dx;
+      const ny = blockY + dy;
+      const nz = blockZ + dz;
+      const visible = neighborIsEmptyForOutline(nx, ny, nz);
+      this.faceGroups[f].visible = visible;
+      anyVisible = anyVisible || visible;
     }
+    const EPS = 0.002;
+    this.highlightBox.scale.set(1 + EPS, 1 + EPS, 1 + EPS);
+    this.highlightBox.visible = anyVisible;
+    this.onHighlightChange?.(new THREE.Vector3(blockX, blockY, blockZ));
+  }
+
+  // -------------------
+  // Utilidades estéticas
+  // -------------------
+  public setColor(hex: number, opacity = 0.95) {
+    this.edgeMaterial.color.setHex(hex);
+    this.edgeMaterial.opacity = opacity;
+    this.edgeMaterial.needsUpdate = true;
+  }
+
+  public pulse(time: number) {
+    const pulse = 0.5 + 0.5 * Math.sin(time * 6);
+    this.edgeMaterial.opacity = 0.5 + 0.5 * pulse;
+    this.edgeMaterial.needsUpdate = true;
+  }
+
+  // -------------------
+  // Limpieza
+  // -------------------
+  public dispose(): void {
+    if (!this.highlightBox) return;
+    this.scene.remove(this.highlightBox);
+
+    // dispose geometries; material es compartido y se libera aquí
+    this.faceGroups.forEach(group => {
+      group.children.forEach(child => {
+        const line = child as THREE.Line;
+        line.geometry.dispose();
+        // no dispose del material por child (compartido)
+      });
+    });
+
+    this.edgeMaterial.dispose();
+    this.faceGroups = [];
+    this.highlightBox = null;
+  }
 }
