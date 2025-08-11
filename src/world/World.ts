@@ -447,7 +447,6 @@ export class World {
                 
                 // Determine LOD based on distance from player
                 const mode = distance <= this.detailedViewDistance ? 'detailed' : 'greedy';
-                console.log(`Chunk [${chunkX},0,${chunkZ}], Distance: ${distance.toFixed(2)}, Mode: ${mode}`);
 
                 const existingMesh = this.chunkMeshes.get(chunkKey);
                 const chunk = this.chunks.get(chunkKey);
@@ -455,10 +454,8 @@ export class World {
                 if (!existingMesh) {
                     // Si no hay un mesh existente, encolar la tarea de generación
                     this.chunkQueue.addTask(chunkX, 0, chunkZ, mode, priority);
-                    console.log(`Queued new ${mode} chunk [${chunkX},0,${chunkZ}]`);
                 } else if (existingMesh.userData.mode !== mode) {
                     // Si el modo de LOD ha cambiado, forzar una actualización
-                    console.log(`LOD change for chunk [${chunkX},0,${chunkZ}]: ${existingMesh.userData.mode} -> ${mode}`);
                     if (chunk) {
                         // Marcar el chunk como sucio para forzar la regeneración
                         chunk.markDirty();

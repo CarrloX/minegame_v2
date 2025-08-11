@@ -448,7 +448,6 @@ export class Chunk {
                 const positionArray = new Float32Array(this.positionArray.buffer, 0, this.vertexCount * 3);
                 const normalArray = new Float32Array(this.normalArray.buffer, 0, this.vertexCount * 3);
                 const uvArray = new Float32Array(this.uvArray.buffer, 0, this.vertexCount * 2);
-                const indexArray = new Uint32Array(this.indexArray.buffer, 0, this.indexCount);
                 
                 // Update position attribute
                 if (positionAttr && positionAttr.count === this.vertexCount) {
@@ -474,12 +473,42 @@ export class Chunk {
                     geometry.setAttribute('uv', new THREE.BufferAttribute(uvArray, 2));
                 }
                 
-                // Update index if it exists
+                // Handle index buffer with proper type (Uint16Array or Uint32Array)
+                const indexArray = this.indexCount > 0 ? 
+                    new Uint32Array(this.indexArray.buffer, 0, this.indexCount) : 
+                    new Uint32Array(0);
+                
+                // Check if we need 32-bit indices (more than 65535 vertices)
+                const needs32BitIndices = this.vertexCount > 65535;
+                
                 if (geometry.index) {
-                    geometry.index.copyArray(indexArray);
-                    geometry.index.needsUpdate = true;
-                } else {
-                    geometry.setIndex(new THREE.BufferAttribute(indexArray, 1));
+                    // If the current index type doesn't match what we need, create a new one
+                    const currentIs32Bit = geometry.index.array instanceof Uint32Array;
+                    
+                    if (currentIs32Bit === needs32BitIndices) {
+                        // Same type, just update the array
+                        geometry.index.copyArray(indexArray);
+                        geometry.index.needsUpdate = true;
+                    } else {
+                        // Need to create a new index buffer with the correct type
+                        geometry.setIndex(null); // Remove existing index
+                        if (needs32BitIndices) {
+                            geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(indexArray), 1, false));
+                        } else {
+                            // Convert to Uint16Array if possible
+                            if (this.vertexCount > 65535) {
+                                console.warn('Chunk has too many vertices for 16-bit indices, but trying to use them anyway');
+                            }
+                            geometry.setIndex(new THREE.BufferAttribute(new Uint16Array(indexArray), 1, false));
+                        }
+                    }
+                } else if (this.indexCount > 0) {
+                    // Create new index buffer with appropriate type
+                    if (needs32BitIndices) {
+                        geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(indexArray), 1, false));
+                    } else {
+                        geometry.setIndex(new THREE.BufferAttribute(new Uint16Array(indexArray), 1, false));
+                    }
                 }
                 
                 geometry.computeBoundingSphere();
@@ -498,12 +527,30 @@ export class Chunk {
             const positionArray = new Float32Array(this.positionArray.buffer, 0, this.vertexCount * 3);
             const normalArray = new Float32Array(this.normalArray.buffer, 0, this.vertexCount * 3);
             const uvArray = new Float32Array(this.uvArray.buffer, 0, this.vertexCount * 2);
-            const indexArray = new Uint32Array(this.indexArray.buffer, 0, this.indexCount);
             
+            // Create index array with appropriate type (Uint16Array or Uint32Array)
+            const needs32BitIndices = this.vertexCount > 65535;
+            const indexArray = this.indexCount > 0 ? 
+                new Uint32Array(this.indexArray.buffer, 0, this.indexCount) : 
+                new Uint32Array(0);
+            
+            // Set geometry attributes
             geometry.setAttribute('position', new THREE.BufferAttribute(positionArray, 3));
             geometry.setAttribute('normal', new THREE.BufferAttribute(normalArray, 3));
             geometry.setAttribute('uv', new THREE.BufferAttribute(uvArray, 2));
-            geometry.setIndex(new THREE.BufferAttribute(indexArray, 1));
+            
+            // Set index with appropriate type
+            if (indexArray.length > 0) {
+                if (needs32BitIndices) {
+                    geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(indexArray), 1, false));
+                } else {
+                    // Convert to Uint16Array if possible
+                    if (this.vertexCount > 65535) {
+                        console.warn('Chunk has too many vertices for 16-bit indices, but trying to use them anyway');
+                    }
+                    geometry.setIndex(new THREE.BufferAttribute(new Uint16Array(indexArray), 1, false));
+                }
+            }
             
             geometry.computeBoundingSphere();
             geometry.computeBoundingBox();

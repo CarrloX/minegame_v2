@@ -44,13 +44,6 @@ export class Game {
     private update(deltaTime: number): void {
         // Update the world (this will handle chunk updates)
         this.world.update(this.player.position);
-        
-        // Update other game systems here (player, physics, etc.)
-        // For now, we'll just log the FPS
-        const fps = 1 / deltaTime;
-        if (fps < 55) {  // Only log if FPS drops below 55
-            console.log(`FPS: ${fps.toFixed(1)}`);
-        }
     }
     
     /**
