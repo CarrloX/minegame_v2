@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { CrosshairManager } from '../ui/CrosshairManager';
 
 /**
  * Handles all rendering for the game using Three.js
@@ -8,6 +9,7 @@ export class Renderer {
     private camera: THREE.PerspectiveCamera;
     private renderer: THREE.WebGLRenderer;
     private clock: THREE.Clock;
+    private crosshairManager: CrosshairManager;
 
     /**
      * Creates a new Renderer instance
@@ -25,9 +27,6 @@ export class Renderer {
             antialias: true,
             canvas: document.createElement('canvas')
         });
-        
-        // Add crosshair to the scene
-        this.addCrosshair();
         
         // Configure renderer
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Limit pixel ratio for better performance
@@ -53,6 +52,9 @@ export class Renderer {
         
         // Set up clock for frame timing
         this.clock = new THREE.Clock();
+        
+        // Initialize crosshair manager
+        this.crosshairManager = new CrosshairManager(this.renderer);
         
         // Handle window resize
         window.addEventListener('resize', () => this.onWindowResize());
@@ -81,59 +83,11 @@ export class Renderer {
     }
     
     /**
-     * Adds a crosshair to the center of the screen
-     */
-    private addCrosshair(): void {
-        const canvas = document.createElement('div');
-        canvas.style.position = 'fixed';
-        canvas.style.top = '50%';
-        canvas.style.left = '50%';
-        canvas.style.transform = 'translate(-50%, -50%)';
-        canvas.style.width = '20px';
-        canvas.style.height = '20px';
-        canvas.style.pointerEvents = 'none';
-        canvas.style.zIndex = '1000';
-        
-        // Create crosshair using CSS
-        const crosshair = document.createElement('div');
-        crosshair.style.width = '6px';
-        crosshair.style.height = '6px';
-        crosshair.style.background = 'rgba(255, 255, 255, 0.8)';
-        crosshair.style.borderRadius = '50%';
-        crosshair.style.position = 'absolute';
-        crosshair.style.top = '50%';
-        crosshair.style.left = '50%';
-        crosshair.style.transform = 'translate(-50%, -50%)';
-        crosshair.style.boxShadow = '0 0 5px rgba(0,0,0,0.5)';
-        
-        // Add a subtle pulsing animation
-        const style = document.createElement('style');
-        style.textContent = `
-            @keyframes pulse {
-                0% { opacity: 0.8; transform: translate(-50%, -50%) scale(1); }
-                50% { opacity: 1; transform: translate(-50%, -50%) scale(1.2); }
-                100% { opacity: 0.8; transform: translate(-50%, -50%) scale(1); }
-            }
-        `;
-        document.head.appendChild(style);
-        crosshair.style.animation = 'pulse 2s infinite';
-        
-        canvas.appendChild(crosshair);
-        document.body.appendChild(canvas);
-    }
-    
-    /**
      * Cleans up resources when the renderer is no longer needed
      */
     public dispose(): void {
         // Remove event listeners
         window.removeEventListener('resize', () => this.onWindowResize());
-        
-        // Remove the crosshair
-        const crosshair = document.querySelector('div[style*="position: absolute"]');
-        if (crosshair && crosshair.parentNode) {
-            crosshair.parentNode.removeChild(crosshair);
-        }
         
         // Dispose of the renderer
         this.renderer.dispose();
@@ -157,6 +111,11 @@ export class Renderer {
      */
     public render(): void {
         this.renderer.render(this.scene, this.camera);
+        
+        // Update crosshair based on what's behind it
+        if (this.crosshairManager) {
+            this.crosshairManager.update();
+        }
     }
     
     /**

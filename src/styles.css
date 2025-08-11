@@ -19,6 +19,50 @@ canvas {
     height: 100%;
 }
 
+/* Crosshair styles */
+:root {
+    --crosshair-color: rgba(255, 255, 255, 0.8);
+    --crosshair-border: rgba(0, 0, 0, 0.5);
+}
+
+#crosshair {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 6px;
+    height: 6px;
+    pointer-events: none; /* Allow clicks to pass through */
+    z-index: 1000;
+}
+
+#crosshair::before,
+#crosshair::after {
+    content: '';
+    position: absolute;
+    background-color: var(--crosshair-color);
+    border: 1px solid var(--crosshair-border);
+    transition: background-color 0.2s, border-color 0.2s;
+}
+
+/* Horizontal line */
+#crosshair::before {
+    width: 16px;  /* Increased from 8px */
+    height: 1px;  /* Thinner line */
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+}
+
+/* Vertical line */
+#crosshair::after {
+    width: 1px;   /* Thinner line */
+    height: 16px; /* Increased from 8px */
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+}
+
 /* Ensure the app container takes full viewport */
 #app {
     width: 100vw;

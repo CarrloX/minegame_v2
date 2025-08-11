@@ -18,7 +18,7 @@ export class World {
     // World generation parameters
     private readonly GROUND_LEVEL = 4; // Y-level of the ground surface
     public viewDistance = 8; // in chunks
-    public detailedViewDistance = 1; // in chunks - Greedy Meshing starts after this distance
+    public detailedViewDistance = 8; // in chunks - Greedy Meshing starts after this distance
     
     // Reference to the Three.js scene
     private scene: THREE.Scene | null = null;
