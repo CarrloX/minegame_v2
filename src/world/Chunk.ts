@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { BlockType } from './BlockType';
 import { GreedyMesher } from './GreedyMesher';
+import { TextureAtlas } from './TextureAtlas';
 
 
 /**
@@ -36,8 +37,15 @@ export class Chunk {
     
     /**
      * Gets the block type at the specified local chunk coordinates
+     * Returns BlockType.AIR if coordinates are out of bounds
      */
     public getBlock(x: number, y: number, z: number): BlockType {
+        // Check bounds first to handle out-of-bounds gracefully
+        if (x < 0 || x >= Chunk.SIZE || 
+            y < 0 || y >= Chunk.HEIGHT || 
+            z < 0 || z >= Chunk.SIZE) {
+            return BlockType.AIR;
+        }
         return this.blocks[this.getIndex(x, y, z)];
     }
     
@@ -242,35 +250,8 @@ export class Chunk {
         const uvs: number[] = [];
         const indices: number[] = [];
         
-        // Coordenadas de textura para los diferentes tipos de bloques
-        const TEXTURE_COORDS = {
-            [BlockType.GRASS]: { x: 0, y: 0, w: 1, h: 1 },
-            [BlockType.DIRT]: { x: 0, y: 1, w: 1, h: 1 },
-            [BlockType.STONE]: { x: 1, y: 1, w: 1, h: 1 },
-            [BlockType.GRASS_SIDE]: { x: 1, y: 0, w: 1, h: 1 }
-        };
-        
-        // Función para obtener coordenadas UV basadas en el tipo de bloque y la cara
-        const getUvCoords = (blockType: BlockType, face: string) => {
-            let texKey = blockType;
-            if (blockType === BlockType.GRASS) {
-                if (face === 'top') texKey = BlockType.GRASS;
-                else if (face === 'bottom') texKey = BlockType.DIRT;
-                else texKey = BlockType.GRASS_SIDE;
-            }
-            const coords = TEXTURE_COORDS[texKey] || TEXTURE_COORDS[BlockType.STONE];
-            const cellSize = 1 / 2;
-            const x = coords.x * cellSize;
-            const y = 1 - (coords.y + 1) * cellSize;
-            const w = cellSize * coords.w;
-            const h = cellSize * coords.h;
-            return [
-                [x, y],
-                [x + w, y],
-                [x + w, y + h],
-                [x, y + h]
-            ];
-        };
+        // Reuse this array to reduce garbage collection
+        const uvTemp: number[][] = [[0, 0], [0, 0], [0, 0], [0, 0]];
         
         // Función para agregar una cara al mesh
         const addFace = (vertices: number[], normal: number[], blockType: BlockType, face: string) => {
@@ -279,8 +260,11 @@ export class Chunk {
                 positions.push(vertices[i], vertices[i + 1], vertices[i + 2]);
                 normals.push(normal[0], normal[1], normal[2]);
             }
-            const uvCoords = getUvCoords(blockType, face);
-            for (let i = 0; i < 4; i++) uvs.push(uvCoords[i][0], uvCoords[i][1]);
+            // Get UV coordinates using the centralized texture atlas
+            TextureAtlas.getUvCoordsReusable(blockType, face, uvTemp);
+            for (let i = 0; i < 4; i++) {
+                uvs.push(uvTemp[i][0], uvTemp[i][1]);
+            }
             indices.push(vertexCount, vertexCount + 1, vertexCount + 2, vertexCount, vertexCount + 2, vertexCount + 3);
         };
         

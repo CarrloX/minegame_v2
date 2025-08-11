@@ -4,13 +4,14 @@ import * as THREE from 'three';
  * Defines the different types of blocks in the game
  */
 export enum BlockType {
-    AIR = 0,    // Empty space
-    GRASS = 1,  // Grass block
-    DIRT = 2,   // Dirt block
-    STONE = 3,  // Stone block
-    SAND = 4,   // Sand block
-    WOOD = 5,   // Wood/Log block
-    LEAVES = 6  // Leaves block
+    AIR = 0,        // Empty space
+    GRASS = 1,      // Grass block (top face)
+    DIRT = 2,       // Dirt block
+    STONE = 3,      // Stone block
+    SAND = 4,       // Sand block
+    WOOD = 5,       // Wood/Log block
+    LEAVES = 6,     // Leaves block
+    GRASS_SIDE = 7  // Grass side face (for texture mapping)
 }
 
 /**
@@ -28,8 +29,7 @@ export interface BlockProperties {
     material?: THREE.Material;
 }
 
-// Create a texture loader
-const textureLoader = new THREE.TextureLoader();
+// Texture loader is now managed by the World class
 
 // Helper function to create a material from texture name
 function createMaterial(textureName: string, transparent = false): THREE.Material {
@@ -81,52 +81,72 @@ export const BLOCK_PROPERTIES: Record<BlockType, BlockProperties> = {
     [BlockType.AIR]: {
         isSolid: false,
         isTransparent: true,
-        texture: { all: 'air' },
-        material: new THREE.MeshBasicMaterial({ visible: false })
+        texture: {
+            all: 'textures/air.png'
+        },
+        material: new THREE.MeshBasicMaterial({
+            transparent: true,
+            opacity: 0,
+            side: THREE.DoubleSide
+        })
     },
     [BlockType.GRASS]: {
         isSolid: true,
         isTransparent: false,
         texture: {
-            top: 'grass_top',
-            side: 'grass_side',
-            bottom: 'dirt'
+            top: 'textures/grass_top.png',
+            side: 'textures/grass_side.png',
+            bottom: 'textures/dirt.png'
         },
-        material: createMaterial('grass_side') // Will be replaced with multi-material
+        material: createMaterial('textures/grass_top.png')
     },
     [BlockType.DIRT]: {
         isSolid: true,
         isTransparent: false,
-        texture: { all: 'dirt' },
-        material: createMaterial('dirt')
+        texture: {
+            all: 'textures/dirt.png'
+        },
+        material: createMaterial('textures/dirt.png')
     },
     [BlockType.STONE]: {
         isSolid: true,
         isTransparent: false,
-        texture: { all: 'stone' },
-        material: createMaterial('stone')
+        texture: {
+            all: 'textures/stone.png'
+        },
+        material: createMaterial('textures/stone.png')
     },
     [BlockType.SAND]: {
         isSolid: true,
         isTransparent: false,
-        texture: { all: 'sand' },
-        material: createMaterial('sand')
+        texture: {
+            all: 'textures/sand.png'
+        },
+        material: createMaterial('textures/sand.png')
     },
     [BlockType.WOOD]: {
         isSolid: true,
         isTransparent: false,
         texture: {
-            top: 'log_top',
-            side: 'log_side',
-            bottom: 'log_top'
+            all: 'textures/oak_log.png'
         },
-        material: createMaterial('log_side') // Will be replaced with multi-material
+        material: createMaterial('textures/oak_log.png')
     },
     [BlockType.LEAVES]: {
         isSolid: true,
         isTransparent: true,
-        texture: { all: 'leaves' },
-        material: createMaterial('leaves', true)
+        texture: {
+            all: 'textures/oak_leaves.png'
+        },
+        material: createMaterial('textures/oak_leaves.png', true)
+    },
+    [BlockType.GRASS_SIDE]: {
+        isSolid: true,
+        isTransparent: false,
+        texture: {
+            all: 'textures/grass_side.png'
+        },
+        material: createMaterial('textures/grass_side.png')
     }
 };
 

@@ -1,5 +1,3 @@
-import { Chunk } from './Chunk';
-
 type ChunkTask = {
     chunkX: number;
     chunkY: number;
