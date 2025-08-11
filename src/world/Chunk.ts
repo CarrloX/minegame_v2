@@ -176,15 +176,12 @@ export class Chunk {
      * Updates the chunk's mesh based on its block data using simple face culling
      */
     private updateMesh(mode: 'detailed' | 'greedy', world: any): void {
-        // Dispose of the old geometry if it exists
-        if (this.mesh) {
-            const geometry = this.mesh.geometry as THREE.BufferGeometry;
-            geometry.dispose();
-            // We don't dispose of materials here as they are shared
-        }
-
+        // Skip if chunk is empty
         if (this.isEmpty()) {
-            this.mesh = null;
+            if (this.mesh) {
+                // Keep the mesh but make it invisible if we want to reuse it later
+                this.mesh.visible = false;
+            }
             this.isDirty = false;
             return;
         }
@@ -194,28 +191,27 @@ export class Chunk {
             // Ensure world reference is passed to GreedyMesher for neighbor chunk queries
             if (!world || typeof world.getBlock !== 'function') {
                 console.warn('World reference not available for greedy meshing');
-                this.mesh = null;
+                if (this.mesh) this.mesh.visible = false;
                 this.isDirty = false;
                 return;
             }
             
+            // Generate the mesh data
             const geometry = GreedyMesher.generateMesh(this, world);
             if (!geometry) {
-                this.mesh = null;
+                if (this.mesh) this.mesh.visible = false;
                 this.isDirty = false;
                 return;
             }
 
-            // Get shared material from world or create a fallback
-            let material;
+            // Get or create material
+            let material: THREE.Material;
             let ownedMaterial = false;
             
             if (world.getMaterial) {
                 material = world.getMaterial();
-                // Material is shared, not owned by this chunk
                 ownedMaterial = false;
             } else {
-                // Create a fallback material that this chunk owns
                 material = new THREE.MeshBasicMaterial({ 
                     color: 0x00ff00,
                     side: THREE.DoubleSide,
@@ -225,21 +221,52 @@ export class Chunk {
                 ownedMaterial = true;
             }
             
-            this.mesh = new THREE.Mesh(geometry, material);
-            this.mesh.userData = { 
-                mode: 'greedy',
-                ownedMaterial: ownedMaterial // Mark if we own this material
-            };
-
-            this.mesh.castShadow = true;
-            this.mesh.receiveShadow = true;
-            
-            // Ajustar la posición del chunk greedy
-            this.mesh.position.set(
-                this.x * Chunk.SIZE,
-                this.y * Chunk.HEIGHT,
-                this.z * Chunk.SIZE
-            );            
+            // Reuse existing mesh if possible
+            if (this.mesh) {
+                // Dispose of old geometry if it exists
+                const oldGeometry = this.mesh.geometry as THREE.BufferGeometry;
+                if (oldGeometry) oldGeometry.dispose();
+                
+                // Update geometry
+                this.mesh.geometry = geometry;
+                
+                // Update material if needed (only if the ownership changed)
+                const currentOwned = this.mesh.userData.ownedMaterial || false;
+                if (currentOwned !== ownedMaterial || this.mesh.material !== material) {
+                    if (currentOwned && this.mesh.material) {
+                        if (Array.isArray(this.mesh.material)) {
+                            this.mesh.material.forEach(m => m.dispose());
+                        } else {
+                            (this.mesh.material as THREE.Material).dispose();
+                        }
+                    }
+                    this.mesh.material = material;
+                }
+                
+                // Update user data
+                this.mesh.userData = { 
+                    mode: 'greedy',
+                    ownedMaterial: ownedMaterial
+                };
+                
+                this.mesh.visible = true;
+            } else {
+                // Create new mesh if it doesn't exist
+                this.mesh = new THREE.Mesh(geometry, material);
+                this.mesh.userData = { 
+                    mode: 'greedy',
+                    ownedMaterial: ownedMaterial
+                };
+                this.mesh.castShadow = true;
+                this.mesh.receiveShadow = true;
+                
+                // Set position
+                this.mesh.position.set(
+                    this.x * Chunk.SIZE,
+                    this.y * Chunk.HEIGHT,
+                    this.z * Chunk.SIZE
+                );
+            }
 
             this.isDirty = false;
             return;
@@ -353,75 +380,136 @@ export class Chunk {
             }
         }
         
-        // Crear la geometría detallada
-        let geometry: THREE.BufferGeometry | null = null;
-        if (positions.length > 0) {
+        // Create or update geometry for detailed mode
+        let geometry: THREE.BufferGeometry;
+        
+        if (this.mesh && this.mesh.userData.mode === 'detailed') {
+            // Reuse existing geometry
+            geometry = this.mesh.geometry as THREE.BufferGeometry;
+            
+            // Update existing attributes if they exist
+            if (positions.length > 0) {
+                // Get or create attributes
+                let positionAttr = geometry.getAttribute('position') as THREE.BufferAttribute;
+                let normalAttr = geometry.getAttribute('normal') as THREE.BufferAttribute;
+                let uvAttr = geometry.getAttribute('uv') as THREE.BufferAttribute;
+                
+                // Update position attribute
+                if (positionAttr) {
+                    positionAttr.copyArray(new Float32Array(positions));
+                    positionAttr.needsUpdate = true;
+                }
+                
+                // Update normal attribute
+                if (normalAttr) {
+                    normalAttr.copyArray(new Float32Array(normals));
+                    normalAttr.needsUpdate = true;
+                }
+                
+                // Update UV attribute
+                if (uvAttr) {
+                    uvAttr.copyArray(new Float32Array(uvs));
+                    uvAttr.needsUpdate = true;
+                }
+                
+                // Update index if it exists
+                if (geometry.index) {
+                    geometry.index.copyArray(new Uint32Array(indices));
+                    geometry.index.needsUpdate = true;
+                }
+                
+                geometry.computeBoundingSphere();
+                geometry.computeBoundingBox();
+            } else {
+                // No geometry to show, make mesh invisible
+                this.mesh.visible = false;
+                this.isDirty = false;
+                return;
+            }
+        } else if (positions.length > 0) {
+            // Create new geometry if none exists or if switching from greedy mode
             geometry = new THREE.BufferGeometry();
             geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
             geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
             geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
             geometry.setIndex(indices);
+            geometry.computeBoundingSphere();
+            geometry.computeBoundingBox();
+        } else {
+            // No geometry to show
+            if (this.mesh) this.mesh.visible = false;
+            this.isDirty = false;
+            return;
         }
 
-        // Crear material y mesh si hay geometría válida (ya sea simple o detallada)
-        if (geometry) {
-            // Calcular bounding box para frustum culling
-            geometry.computeBoundingBox();
-
-            // Cargar textura del atlas
+        // Get or create material
+        let material: THREE.Material;
+        let ownedMaterial = false;
+        
+        if (world.getMaterial) {
+            material = world.getMaterial();
+            ownedMaterial = false;
+        } else {
+            // Fallback material if world doesn't provide one
             const textureLoader = new THREE.TextureLoader();
             const texture = textureLoader.load('/assets/textures/atlas.png');
-
-            // Configuración óptima para texturas pixeladas
             texture.magFilter = THREE.NearestFilter;
-            texture.minFilter = THREE.NearestFilter;
-            texture.generateMipmaps = false;
-            texture.anisotropy = 1;
-            texture.wrapS = THREE.ClampToEdgeWrapping;
-            texture.wrapT = THREE.ClampToEdgeWrapping;
-            texture.premultiplyAlpha = false;
-
-            // Get shared material from world or create a fallback
-            let material;
-            let ownedMaterial = false;
+            texture.minFilter = THREE.NearestMipmapLinearFilter;
             
-            if (world.getMaterial) {
-                material = world.getMaterial();
-                // Material is shared, not owned by this chunk
-                ownedMaterial = false;
-            } else {
-                // Create a fallback material that this chunk owns
-                material = new THREE.MeshBasicMaterial({
-                    map: texture,
-                    side: THREE.FrontSide,
-                    color: 0xFFFFFF,
-                    fog: false,
-                    toneMapped: false,
-                    transparent: true,
-                    alphaTest: 0.1
-                });
-                ownedMaterial = true;
-            }
+            material = new THREE.MeshStandardMaterial({
+                map: texture,
+                side: THREE.DoubleSide,
+                transparent: true,
+                alphaTest: 0.5
+            });
+            ownedMaterial = true;
+        }
 
-            // Create the mesh
-            this.mesh = new THREE.Mesh(geometry, material);
-            this.mesh.castShadow = true;
-            this.mesh.receiveShadow = true;
+        // Reuse or create mesh
+        if (this.mesh) {
+            // Dispose of old geometry if it's not being reused
+            if (this.mesh.userData.mode !== 'detailed') {
+                const oldGeometry = this.mesh.geometry as THREE.BufferGeometry;
+                if (oldGeometry) oldGeometry.dispose();
+                this.mesh.geometry = geometry;
+            }
+            
+            // Update material if needed
+            const currentOwned = this.mesh.userData.ownedMaterial || false;
+            if (currentOwned !== ownedMaterial || this.mesh.material !== material) {
+                if (currentOwned && this.mesh.material) {
+                    if (Array.isArray(this.mesh.material)) {
+                        this.mesh.material.forEach(m => m.dispose());
+                    } else {
+                        (this.mesh.material as THREE.Material).dispose();
+                    }
+                }
+                this.mesh.material = material;
+            }
+            
+            // Update user data
             this.mesh.userData = { 
                 mode: 'detailed',
-                ownedMaterial: ownedMaterial // Mark if we own this material
+                ownedMaterial: ownedMaterial
             };
             
-            // Ajustar la posición del chunk greedy
-            // Para chunks greedy, no multiplicar y por HEIGHT para mantener la alineación correcta
+            this.mesh.visible = true;
+        } else {
+            // Create new mesh
+            this.mesh = new THREE.Mesh(geometry, material);
+            this.mesh.userData = { 
+                mode: 'detailed',
+                ownedMaterial: ownedMaterial
+            };
+            this.mesh.castShadow = true;
+            this.mesh.receiveShadow = true;
+            
+            // Set position
             this.mesh.position.set(
                 this.x * Chunk.SIZE,
-                this.y,  // No multiplicar por HEIGHT para chunks greedy
+                this.y * Chunk.HEIGHT,
                 this.z * Chunk.SIZE
             );
-        } else {
-            // Si no hay geometría, establecer mesh a null
-            this.mesh = null;
         }
         
         // Marcar como actualizado
