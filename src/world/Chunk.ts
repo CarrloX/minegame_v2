@@ -99,11 +99,23 @@ export class Chunk {
         return this.mesh;
     }
 
+    /**
+     * Disposes of the chunk's resources
+     * Only disposes of materials that are owned by this chunk
+     */
     public dispose(): void {
         if (this.mesh) {
-            // Only dispose of the geometry, not the shared material
+            // Always dispose of the geometry
             this.mesh.geometry.dispose();
-            // We don't dispose of materials here as they are shared
+            
+            // Only dispose of materials if they are owned by this chunk
+            if (this.mesh.userData.ownedMaterial) {
+                if (Array.isArray(this.mesh.material)) {
+                    this.mesh.material.forEach(m => m.dispose());
+                } else if (this.mesh.material) {
+                    this.mesh.material.dispose();
+                }
+            }
         }
     }
     
@@ -142,15 +154,29 @@ export class Chunk {
             }
 
             // Get shared material from world or create a fallback
-            const material = world.getMaterial ? world.getMaterial() : new THREE.MeshBasicMaterial({ 
-                color: 0x00ff00,
-                side: THREE.DoubleSide,
-                transparent: true,
-                alphaTest: 0.1
-            });
+            let material;
+            let ownedMaterial = false;
+            
+            if (world.getMaterial) {
+                material = world.getMaterial();
+                // Material is shared, not owned by this chunk
+                ownedMaterial = false;
+            } else {
+                // Create a fallback material that this chunk owns
+                material = new THREE.MeshBasicMaterial({ 
+                    color: 0x00ff00,
+                    side: THREE.DoubleSide,
+                    transparent: true,
+                    alphaTest: 0.1
+                });
+                ownedMaterial = true;
+            }
             
             this.mesh = new THREE.Mesh(geometry, material);
-            this.mesh.userData = { mode: 'greedy' }; // Store mode for reference
+            this.mesh.userData = { 
+                mode: 'greedy',
+                ownedMaterial: ownedMaterial // Mark if we own this material
+            };
 
             this.mesh.castShadow = true;
             this.mesh.receiveShadow = true;
@@ -299,21 +325,36 @@ export class Chunk {
             texture.wrapT = THREE.ClampToEdgeWrapping;
             texture.premultiplyAlpha = false;
 
-            // Material para el chunk
-            const material = new THREE.MeshBasicMaterial({
-                map: texture,
-                side: THREE.FrontSide,
-                color: 0xFFFFFF,
-                fog: false,
-                toneMapped: false,
-                transparent: true,
-                alphaTest: 0.1
-            });
+            // Get shared material from world or create a fallback
+            let material;
+            let ownedMaterial = false;
+            
+            if (world.getMaterial) {
+                material = world.getMaterial();
+                // Material is shared, not owned by this chunk
+                ownedMaterial = false;
+            } else {
+                // Create a fallback material that this chunk owns
+                material = new THREE.MeshBasicMaterial({
+                    map: texture,
+                    side: THREE.FrontSide,
+                    color: 0xFFFFFF,
+                    fog: false,
+                    toneMapped: false,
+                    transparent: true,
+                    alphaTest: 0.1
+                });
+                ownedMaterial = true;
+            }
 
-            // Crear el mesh
+            // Create the mesh
             this.mesh = new THREE.Mesh(geometry, material);
             this.mesh.castShadow = true;
             this.mesh.receiveShadow = true;
+            this.mesh.userData = { 
+                mode: 'detailed',
+                ownedMaterial: ownedMaterial // Mark if we own this material
+            };
             
             // Ajustar la posición del chunk greedy
             // Para chunks greedy, no multiplicar y por HEIGHT para mantener la alineación correcta
