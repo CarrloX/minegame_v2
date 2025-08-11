@@ -61,7 +61,7 @@ export class World {
         // Initialize worker manager
         this.workerManager = WorkerManager.getInstance();
         
-        // Load the texture atlas
+        // Load and initialize the texture atlas and materials
         this.loadTextureAtlas();
     }
     
@@ -72,24 +72,53 @@ export class World {
      * Loads the texture atlas and initializes shared materials
      */
     private loadTextureAtlas(): void {
-        // Load texture atlas
-        this.textureAtlas = this.textureLoader.load('/assets/textures/atlas.png');
-        this.textureAtlas.magFilter = THREE.NearestFilter;
-        this.textureAtlas.minFilter = THREE.NearestFilter;
-        this.textureAtlas.generateMipmaps = false;
-        this.textureAtlas.anisotropy = 1;
-        this.textureAtlas.wrapS = THREE.ClampToEdgeWrapping;
-        this.textureAtlas.wrapT = THREE.ClampToEdgeWrapping;
-        this.textureAtlas.premultiplyAlpha = false;
+        try {
+            console.log('Loading texture atlas...');
+            
+            // Load texture atlas
+            this.textureAtlas = this.textureLoader.load(
+                '/assets/textures/atlas.png',
+                (texture) => {
+                    console.log('Texture atlas loaded successfully');
+                    texture.magFilter = THREE.NearestFilter;
+                    texture.minFilter = THREE.NearestFilter;
+                    texture.generateMipmaps = false;
+                    texture.anisotropy = 1;
+                    texture.wrapS = THREE.ClampToEdgeWrapping;
+                    texture.wrapT = THREE.ClampToEdgeWrapping;
+                    texture.premultiplyAlpha = false;
 
-        // Create shared material with the loaded texture
-        this.materialSettings.map = this.textureAtlas;
-        this.sharedMaterial = new THREE.MeshBasicMaterial(this.materialSettings);
-        
-        // Create debug material (wireframe)
-        this.debugMaterial = this.sharedMaterial.clone();
-        this.debugMaterial.wireframe = true;
-        this.debugMaterial.wireframeLinewidth = 1;
+                    // Create shared material with the loaded texture
+                    this.materialSettings.map = texture;
+                    this.sharedMaterial = new THREE.MeshBasicMaterial(this.materialSettings);
+                    
+                    // Create debug material (wireframe)
+                    this.debugMaterial = this.sharedMaterial.clone();
+                    this.debugMaterial.wireframe = true;
+                    this.debugMaterial.wireframeLinewidth = 1;
+                    
+                    console.log('Shared materials initialized');
+                    
+                    // Mark all chunks as dirty to regenerate with new material
+                    this.markAllChunksDirty();
+                },
+                undefined,
+                (error) => {
+                    console.error('Error loading texture atlas:', error);
+                }
+            );
+        } catch (error) {
+            console.error('Failed to load texture atlas:', error);
+        }
+    }
+    
+    /**
+     * Marks all chunks as dirty to force regeneration with new materials
+     */
+    private markAllChunksDirty(): void {
+        for (const chunk of this.chunks.values()) {
+            chunk.markDirty();
+        }
     }
     
     /**
@@ -475,8 +504,13 @@ export class World {
     
     /**
      * Gets the shared material for chunk meshes
+     * @param debug Optional flag to get the debug wireframe material
+     * @returns The shared material or null if not loaded yet
      */
-    public getMaterial(): THREE.Material | null {
+    public getMaterial(debug: boolean = false): THREE.Material | null {
+        if (debug) {
+            return this.debugMaterial || this.sharedMaterial;
+        }
         return this.sharedMaterial;
     }
 

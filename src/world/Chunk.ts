@@ -101,12 +101,9 @@ export class Chunk {
 
     public dispose(): void {
         if (this.mesh) {
+            // Only dispose of the geometry, not the shared material
             this.mesh.geometry.dispose();
-            if (Array.isArray(this.mesh.material)) {
-                this.mesh.material.forEach(material => material.dispose());
-            } else {
-                this.mesh.material.dispose();
-            }
+            // We don't dispose of materials here as they are shared
         }
     }
     
@@ -114,15 +111,11 @@ export class Chunk {
      * Updates the chunk's mesh based on its block data using simple face culling
      */
     private updateMesh(mode: 'detailed' | 'greedy', world: any): void {
-        // Dispose of the old mesh if it exists
+        // Dispose of the old geometry if it exists
         if (this.mesh) {
             const geometry = this.mesh.geometry as THREE.BufferGeometry;
             geometry.dispose();
-            if (Array.isArray(this.mesh.material)) {
-                (this.mesh.material as THREE.Material[]).forEach(material => material.dispose());
-            } else if (this.mesh.material) {
-                (this.mesh.material as THREE.Material).dispose();
-            }
+            // We don't dispose of materials here as they are shared
         }
 
         if (this.isEmpty()) {
@@ -148,17 +141,21 @@ export class Chunk {
                 return;
             }
 
-            // Get shared material from world
-            const material = world.getMaterial && typeof world.getMaterial === 'function' 
-                ? world.getMaterial() 
-                : new THREE.MeshBasicMaterial();
-
+            // Get shared material from world or create a fallback
+            const material = world.getMaterial ? world.getMaterial() : new THREE.MeshBasicMaterial({ 
+                color: 0x00ff00,
+                side: THREE.DoubleSide,
+                transparent: true,
+                alphaTest: 0.1
+            });
+            
             this.mesh = new THREE.Mesh(geometry, material);
+            this.mesh.userData = { mode: 'greedy' }; // Store mode for reference
+
             this.mesh.castShadow = true;
             this.mesh.receiveShadow = true;
             
             // Ajustar la posición del chunk greedy
-            // Para chunks greedy, no multiplicar y por HEIGHT para mantener la alineación correcta
             this.mesh.position.set(
                 this.x * Chunk.SIZE,
                 this.y * Chunk.HEIGHT,
