@@ -15,6 +15,7 @@ export class Chunk {
     private blocks: Uint8Array;
     private mesh: THREE.Mesh | null;
     public isDirty: boolean;
+    private nonAirCount: number = 0; // Track number of non-air blocks for fast isEmpty()
     
     // Chunk position in chunk coordinates (not block coordinates)
     constructor(public readonly x: number, public readonly y: number, public readonly z: number) {
@@ -44,7 +45,17 @@ export class Chunk {
      * Sets the block type at the specified local chunk coordinates
      */
     public setBlock(x: number, y: number, z: number, blockType: BlockType): void {
-        this.blocks[this.getIndex(x, y, z)] = blockType;
+        const index = this.getIndex(x, y, z);
+        const currentBlock = this.blocks[index];
+        
+        // Update non-air count
+        if (currentBlock === BlockType.AIR && blockType !== BlockType.AIR) {
+            this.nonAirCount++;
+        } else if (currentBlock !== BlockType.AIR && blockType === BlockType.AIR) {
+            this.nonAirCount--;
+        }
+        
+        this.blocks[index] = blockType;
     }
     
     /**
@@ -63,10 +74,43 @@ export class Chunk {
         const minZ = Math.max(0, Math.min(z1, z2));
         const maxZ = Math.min(Chunk.SIZE - 1, Math.max(z1, z2));
         
+        // Count non-air blocks in the fill region to update nonAirCount efficiently
+        let airToNonAir = 0;
+        let nonAirToAir = 0;
+        
+        if (blockType === BlockType.AIR) {
+            // Count non-air blocks that will become air
+            for (let y = minY; y <= maxY; y++) {
+                for (let z = minZ; z <= maxZ; z++) {
+                    for (let x = minX; x <= maxX; x++) {
+                        if (this.getBlock(x, y, z) !== BlockType.AIR) {
+                            nonAirToAir++;
+                        }
+                    }
+                }
+            }
+            this.nonAirCount -= nonAirToAir;
+        } else {
+            // Count air blocks that will become non-air
+            for (let y = minY; y <= maxY; y++) {
+                for (let z = minZ; z <= maxZ; z++) {
+                    for (let x = minX; x <= maxX; x++) {
+                        if (this.getBlock(x, y, z) === BlockType.AIR) {
+                            airToNonAir++;
+                        } else {
+                            nonAirToAir++;
+                        }
+                    }
+                }
+            }
+            this.nonAirCount = this.nonAirCount + airToNonAir - nonAirToAir;
+        }
+        
+        // Now perform the actual fill
         for (let y = minY; y <= maxY; y++) {
             for (let z = minZ; z <= maxZ; z++) {
                 for (let x = minX; x <= maxX; x++) {
-                    this.setBlock(x, y, z, blockType);
+                    this.blocks[this.getIndex(x, y, z)] = blockType;
                 }
             }
         }
@@ -77,9 +121,10 @@ export class Chunk {
      */
     /**
      * Checks if the chunk is empty (contains only air blocks)
+     * Optimized to O(1) using nonAirCount
      */
     public isEmpty(): boolean {
-        return this.blocks.every(block => block === BlockType.AIR);
+        return this.nonAirCount === 0;
     }
     
     /**
