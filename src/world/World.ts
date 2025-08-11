@@ -18,7 +18,7 @@ export class World {
     // World generation parameters
     private readonly GROUND_LEVEL = 4; // Y-level of the ground surface
     public viewDistance = 8; // in chunks
-    public detailedViewDistance = 2; // in chunks
+    public detailedViewDistance = 1; // in chunks - Greedy Meshing starts after this distance
     
     // Reference to the Three.js scene
     private scene: THREE.Scene | null = null;
@@ -39,7 +39,7 @@ export class World {
     // Material settings
     private readonly materialSettings = {
         map: null as THREE.Texture | null,
-        side: THREE.FrontSide,
+        side: THREE.DoubleSide,  // Renderizar ambos lados de las caras
         color: 0xFFFFFF,
         fog: false,
         toneMapped: false,
@@ -294,37 +294,47 @@ export class World {
         if (!this.scene || !this.sharedMaterial) return;
         const chunkKey = this.getChunkKey(chunk.x, chunk.y, chunk.z);
         
-        this.removeChunkFromScene(chunk.x, chunk.y, chunk.z); // Remove old mesh if it exists
-
-        try {
-            // Pass 'this' as the world reference so the chunk can query neighbor blocks
-            const mesh = chunk.getMesh(mode, this);
-            if (mesh) {
-                // Store the LOD mode in the mesh for later reference
-                mesh.userData = mesh.userData || {};
-                mesh.userData.mode = mode;
-                mesh.userData.chunkX = chunk.x;
-                mesh.userData.chunkY = chunk.y;
-                mesh.userData.chunkZ = chunk.z;
+        // Verificar si el chunk ya tiene un mesh con un modo diferente
+        const existingMesh = this.chunkMeshes.get(chunkKey);
+        const needsUpdate = !existingMesh || existingMesh.userData?.mode !== mode;
+        
+        // Solo actualizar si es necesario
+        if (needsUpdate) {
+            this.removeChunkFromScene(chunk.x, chunk.y, chunk.z); // Remove old mesh if it exists
+            
+            try {
+                console.log(`Generating ${mode} mesh for chunk [${chunk.x},${chunk.y},${chunk.z}]`);
+                // Forzar la actualización del mesh con el nuevo modo
+                chunk.markDirty();
+                const mesh = chunk.getMesh(mode, this);
                 
-                // Apply the shared material
-                const material = this.getMaterial();
-                if (material) {
-                    mesh.material = material;
-                    this.chunkMeshes.set(chunkKey, mesh);
-                    this.scene.add(mesh);
-                } else {
-                    console.warn(`Failed to get material for chunk ${chunkKey}`);
-                    return;
+                if (mesh) {
+                    // Store the LOD mode in the mesh for later reference
+                    mesh.userData = mesh.userData || {};
+                    mesh.userData.mode = mode;
+                    mesh.userData.chunkX = chunk.x;
+                    mesh.userData.chunkY = chunk.y;
+                    mesh.userData.chunkZ = chunk.z;
+                    
+                    // Apply the shared material
+                    const material = this.getMaterial();
+                    if (material) {
+                        mesh.material = material;
+                        this.chunkMeshes.set(chunkKey, mesh);
+                        this.scene.add(mesh);
+                        
+                        // Apply debug visualization if debug manager is available
+                        if (this.debugManager) {
+                            this.debugManager.applyWireframeToMesh(chunkKey, mesh);
+                        }
+                    } else {
+                        console.warn(`Failed to get material for chunk ${chunkKey}`);
+                        return;
+                    }
                 }
-                
-                // Apply debug visualization if debug manager is available
-                if (this.debugManager) {
-                    this.debugManager.applyWireframeToMesh(chunkKey, mesh);
-                }
+            } catch (error) {
+                console.error(`Error generating mesh for chunk ${chunkKey}:`, error);
             }
-        } catch (error) {
-            console.error(`Error generating mesh for chunk ${chunkKey}:`, error);
         }
     }
     
@@ -382,16 +392,7 @@ export class World {
         this.chunks.delete(chunkKey);
     }
 
-    /**
-     * Determines the appropriate level of detail for a chunk based on its distance from the player
-     * @param dx X distance from player in chunks
-     * @param dz Z distance from player in chunks
-     * @returns 'detailed' or 'greedy' depending on the distance
-     */
-    private determineLOD(dx: number, dz: number): 'detailed' | 'greedy' {
-        const distance = Math.sqrt(dx*dx + dz*dz);
-        return distance <= this.detailedViewDistance ? 'detailed' : 'greedy';
-    }
+
 
     /**
      * Loads and unloads chunks around the player based on view distance
@@ -410,22 +411,35 @@ export class World {
                 requiredChunks.add(chunkKey);
 
                 // Calculate distance from player for priority
-                const distance = Math.sqrt(x * x + z * z);
+                const dx = Math.abs(x);
+                const dz = Math.abs(z);
+                const distance = Math.sqrt(dx * dx + dz * dz);
                 const priority = Math.floor(distance * 10); // Higher priority for closer chunks
                 
                 // Determine LOD based on distance from player
-                const mode = this.determineLOD(x, z);
+                const mode = distance <= this.detailedViewDistance ? 'detailed' : 'greedy';
+                console.log(`Chunk [${chunkX},0,${chunkZ}], Distance: ${distance.toFixed(2)}, Mode: ${mode}`);
 
                 const existingMesh = this.chunkMeshes.get(chunkKey);
+                const chunk = this.chunks.get(chunkKey);
+                
                 if (!existingMesh) {
-                    // Queue chunk for generation and meshing
+                    // Si no hay un mesh existente, encolar la tarea de generación
                     this.chunkQueue.addTask(chunkX, 0, chunkZ, mode, priority);
+                    console.log(`Queued new ${mode} chunk [${chunkX},0,${chunkZ}]`);
                 } else if (existingMesh.userData.mode !== mode) {
-                    // Queue chunk for LOD update with higher priority
-                    const chunk = this.chunks.get(chunkKey);
+                    // Si el modo de LOD ha cambiado, forzar una actualización
+                    console.log(`LOD change for chunk [${chunkX},0,${chunkZ}]: ${existingMesh.userData.mode} -> ${mode}`);
                     if (chunk) {
-                        this.chunkQueue.addTask(chunkX, 0, chunkZ, mode, priority - 0.5); // Slightly higher priority than new chunks
+                        // Marcar el chunk como sucio para forzar la regeneración
+                        chunk.markDirty();
+                        // Asegurarse de que el chunk se actualice con el nuevo modo
+                        this.chunkQueue.addTask(chunkX, 0, chunkZ, mode, priority - 0.5);
                     }
+                } else if (chunk && chunk.isDirty) {
+                    // Si el chunk está marcado como sucio, encolar una actualización
+                    this.chunkQueue.addTask(chunkX, 0, chunkZ, mode, priority);
+                    console.log(`Queued update for dirty chunk [${chunkX},0,${chunkZ}]`);
                 }
             }
         }
@@ -441,8 +455,11 @@ export class World {
     private updateDirtyChunks(): void {
         for (const chunk of this.chunks.values()) {
             if (chunk.isDirty) {
-                const mesh = this.chunkMeshes.get(this.getChunkKey(chunk.x, chunk.y, chunk.z));
+                const chunkKey = this.getChunkKey(chunk.x, chunk.y, chunk.z);
+                const mesh = this.chunkMeshes.get(chunkKey);
                 const mode = mesh?.userData.mode || 'detailed';
+                
+                console.log(`Updating dirty chunk [${chunk.x},${chunk.y},${chunk.z}] in ${mode} mode`);
                 this.addChunkToScene(chunk, mode);
                 chunk.isDirty = false;
             }

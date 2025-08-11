@@ -35,14 +35,17 @@ export class ChunkQueue {
         const task = { chunkX, chunkY, chunkZ, priority, mode };
 
         if (existingIndex >= 0) {
-            // Update existing task if new one has higher priority
-            if (this.queue[existingIndex].priority > priority) {
+            const existingTask = this.queue[existingIndex];
+            // Update existing task if new one has higher priority or if the mode has changed
+            if (existingTask.priority > priority || existingTask.mode !== mode) {
                 this.queue[existingIndex] = task;
                 this.sortQueue();
+                console.log(`Updated task for chunk [${chunkX},${chunkY},${chunkZ}] to mode: ${mode}`);
             }
         } else {
             this.queue.push(task);
             this.sortQueue();
+            console.log(`Added new task for chunk [${chunkX},${chunkY},${chunkZ}] with mode: ${mode}`);
         }
 
         this.startProcessing();

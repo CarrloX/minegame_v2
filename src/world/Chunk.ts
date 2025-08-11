@@ -156,9 +156,12 @@ export class Chunk {
             this.mesh = new THREE.Mesh(geometry, material);
             this.mesh.castShadow = true;
             this.mesh.receiveShadow = true;
+            
+            // Ajustar la posición del chunk greedy
+            // Para chunks greedy, no multiplicar y por HEIGHT para mantener la alineación correcta
             this.mesh.position.set(
                 this.x * Chunk.SIZE,
-                this.y * Chunk.HEIGHT,
+                this.y,  // No multiplicar por HEIGHT para chunks greedy
                 this.z * Chunk.SIZE
             );
 
@@ -314,9 +317,12 @@ export class Chunk {
             this.mesh = new THREE.Mesh(geometry, material);
             this.mesh.castShadow = true;
             this.mesh.receiveShadow = true;
+            
+            // Ajustar la posición del chunk greedy
+            // Para chunks greedy, no multiplicar y por HEIGHT para mantener la alineación correcta
             this.mesh.position.set(
                 this.x * Chunk.SIZE,
-                this.y * Chunk.HEIGHT,
+                this.y,  // No multiplicar por HEIGHT para chunks greedy
                 this.z * Chunk.SIZE
             );
         } else {
