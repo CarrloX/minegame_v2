@@ -18,11 +18,36 @@ export class Chunk {
     public isDirty: boolean;
     private nonAirCount: number = 0; // Track number of non-air blocks for fast isEmpty()
     
+    // Pre-allocated typed arrays for mesh data
+    private positionArray: Float32Array;
+    private normalArray: Float32Array;
+    private uvArray: Float32Array;
+    private indexArray: Uint32Array;
+    private vertexCount: number = 0;
+    private indexCount: number = 0;
+    
+    // Reusable array for UV calculations
+    private uvTemp: number[][] = [[0, 0], [0, 0], [0, 0], [0, 0]];
+    
     // Chunk position in chunk coordinates (not block coordinates)
     constructor(public readonly x: number, public readonly y: number, public readonly z: number) {
         this.blocks = new Uint8Array(Chunk.SIZE * Chunk.SIZE * Chunk.HEIGHT);
         this.mesh = null;
         this.isDirty = true;
+        
+        // Pre-allocate typed arrays with maximum possible size
+        // Maximum possible faces in a chunk: 16x16x16 blocks * 6 faces = 24,576 faces
+        // Each face has 4 vertices (24,576 * 4 = 98,304 vertices)
+        // Each vertex has 3 components (x,y,z) = 294,912 position/normal components
+        // Each vertex has 2 UV components = 196,608 UV components
+        // Each face has 6 indices = 147,456 indices
+        const maxVertices = Chunk.SIZE * Chunk.SIZE * Chunk.HEIGHT * 24; // 24 vertices per block (6 faces * 4 vertices)
+        const maxIndices = Chunk.SIZE * Chunk.SIZE * Chunk.HEIGHT * 36;  // 36 indices per block (6 faces * 6 indices)
+        
+        this.positionArray = new Float32Array(maxVertices * 3); // x,y,z for each vertex
+        this.normalArray = new Float32Array(maxVertices * 3);   // nx,ny,nz for each vertex
+        this.uvArray = new Float32Array(maxVertices * 2);       // u,v for each vertex
+        this.indexArray = new Uint32Array(maxIndices);
     }
     
     /**
@@ -272,27 +297,52 @@ export class Chunk {
             return;
         }
         
-        const positions: number[] = [];
-        const normals: number[] = [];
-        const uvs: number[] = [];
-        const indices: number[] = [];
+        // Reuse this array to reduce garbage collection (kept for backward compatibility)
+        // Note: This is now a class-level variable, but we keep this for any other code that might use it
         
-        // Reuse this array to reduce garbage collection
-        const uvTemp: number[][] = [[0, 0], [0, 0], [0, 0], [0, 0]];
+        // Reset counters
+        this.vertexCount = 0;
+        this.indexCount = 0;
         
-        // Función para agregar una cara al mesh
+        // Use the class-level typed arrays directly
+        
+        // Function to add a face to the mesh using pre-allocated typed arrays
         const addFace = (vertices: number[], normal: number[], blockType: BlockType, face: string) => {
-            const vertexCount = positions.length / 3;
-            for (let i = 0; i < vertices.length; i += 3) {
-                positions.push(vertices[i], vertices[i + 1], vertices[i + 2]);
-                normals.push(normal[0], normal[1], normal[2]);
-            }
-            // Get UV coordinates using the centralized texture atlas
-            TextureAtlas.getUvCoordsReusable(blockType, face, uvTemp);
+            const vertexIndex = this.vertexCount;
+            
+            // Add vertex positions and normals
             for (let i = 0; i < 4; i++) {
-                uvs.push(uvTemp[i][0], uvTemp[i][1]);
+                const v = i * 3; // 0, 3, 6, 9
+                
+                // Add position
+                this.positionArray[this.vertexCount * 3] = vertices[v];
+                this.positionArray[this.vertexCount * 3 + 1] = vertices[v + 1];
+                this.positionArray[this.vertexCount * 3 + 2] = vertices[v + 2];
+                
+                // Add normal
+                this.normalArray[this.vertexCount * 3] = normal[0];
+                this.normalArray[this.vertexCount * 3 + 1] = normal[1];
+                this.normalArray[this.vertexCount * 3 + 2] = normal[2];
+                
+                this.vertexCount++;
             }
-            indices.push(vertexCount, vertexCount + 1, vertexCount + 2, vertexCount, vertexCount + 2, vertexCount + 3);
+            
+            // Get UV coordinates using the centralized texture atlas
+            TextureAtlas.getUvCoordsReusable(blockType, face, this.uvTemp);
+            
+            // Add UVs
+            for (let i = 0; i < 4; i++) {
+                this.uvArray[vertexIndex * 2 + i * 2] = this.uvTemp[i][0];
+                this.uvArray[vertexIndex * 2 + i * 2 + 1] = this.uvTemp[i][1];
+            }
+            
+            // Add indices (two triangles: 0,1,2 and 0,2,3)
+            this.indexArray[this.indexCount++] = vertexIndex;
+            this.indexArray[this.indexCount++] = vertexIndex + 1;
+            this.indexArray[this.indexCount++] = vertexIndex + 2;
+            this.indexArray[this.indexCount++] = vertexIndex;
+            this.indexArray[this.indexCount++] = vertexIndex + 2;
+            this.indexArray[this.indexCount++] = vertexIndex + 3;
         };
         
         // Verificar si un bloque está oculto (rodeado por bloques en todas las direcciones)
@@ -383,39 +433,53 @@ export class Chunk {
         // Create or update geometry for detailed mode
         let geometry: THREE.BufferGeometry;
         
-        if (this.mesh && this.mesh.userData.mode === 'detailed') {
+        if (this.mesh && this.mesh.userData.mode === 'detailed' && this.vertexCount > 0) {
             // Reuse existing geometry
             geometry = this.mesh.geometry as THREE.BufferGeometry;
             
             // Update existing attributes if they exist
-            if (positions.length > 0) {
+            if (this.vertexCount > 0) {
                 // Get or create attributes
                 let positionAttr = geometry.getAttribute('position') as THREE.BufferAttribute;
                 let normalAttr = geometry.getAttribute('normal') as THREE.BufferAttribute;
                 let uvAttr = geometry.getAttribute('uv') as THREE.BufferAttribute;
                 
+                // Create new buffer attributes with the exact size needed
+                const positionArray = new Float32Array(this.positionArray.buffer, 0, this.vertexCount * 3);
+                const normalArray = new Float32Array(this.normalArray.buffer, 0, this.vertexCount * 3);
+                const uvArray = new Float32Array(this.uvArray.buffer, 0, this.vertexCount * 2);
+                const indexArray = new Uint32Array(this.indexArray.buffer, 0, this.indexCount);
+                
                 // Update position attribute
-                if (positionAttr) {
-                    positionAttr.copyArray(new Float32Array(positions));
+                if (positionAttr && positionAttr.count === this.vertexCount) {
+                    positionAttr.copyArray(positionArray);
                     positionAttr.needsUpdate = true;
+                } else {
+                    geometry.setAttribute('position', new THREE.BufferAttribute(positionArray, 3));
                 }
                 
                 // Update normal attribute
-                if (normalAttr) {
-                    normalAttr.copyArray(new Float32Array(normals));
+                if (normalAttr && normalAttr.count === this.vertexCount) {
+                    normalAttr.copyArray(normalArray);
                     normalAttr.needsUpdate = true;
+                } else {
+                    geometry.setAttribute('normal', new THREE.BufferAttribute(normalArray, 3));
                 }
                 
                 // Update UV attribute
-                if (uvAttr) {
-                    uvAttr.copyArray(new Float32Array(uvs));
+                if (uvAttr && uvAttr.count === this.vertexCount) {
+                    uvAttr.copyArray(uvArray);
                     uvAttr.needsUpdate = true;
+                } else {
+                    geometry.setAttribute('uv', new THREE.BufferAttribute(uvArray, 2));
                 }
                 
                 // Update index if it exists
                 if (geometry.index) {
-                    geometry.index.copyArray(new Uint32Array(indices));
+                    geometry.index.copyArray(indexArray);
                     geometry.index.needsUpdate = true;
+                } else {
+                    geometry.setIndex(new THREE.BufferAttribute(indexArray, 1));
                 }
                 
                 geometry.computeBoundingSphere();
@@ -426,13 +490,21 @@ export class Chunk {
                 this.isDirty = false;
                 return;
             }
-        } else if (positions.length > 0) {
+        } else if (this.vertexCount > 0) {
             // Create new geometry if none exists or if switching from greedy mode
             geometry = new THREE.BufferGeometry();
-            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-            geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-            geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-            geometry.setIndex(indices);
+            
+            // Create typed arrays with the exact size needed
+            const positionArray = new Float32Array(this.positionArray.buffer, 0, this.vertexCount * 3);
+            const normalArray = new Float32Array(this.normalArray.buffer, 0, this.vertexCount * 3);
+            const uvArray = new Float32Array(this.uvArray.buffer, 0, this.vertexCount * 2);
+            const indexArray = new Uint32Array(this.indexArray.buffer, 0, this.indexCount);
+            
+            geometry.setAttribute('position', new THREE.BufferAttribute(positionArray, 3));
+            geometry.setAttribute('normal', new THREE.BufferAttribute(normalArray, 3));
+            geometry.setAttribute('uv', new THREE.BufferAttribute(uvArray, 2));
+            geometry.setIndex(new THREE.BufferAttribute(indexArray, 1));
+            
             geometry.computeBoundingSphere();
             geometry.computeBoundingBox();
         } else {
