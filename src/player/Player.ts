@@ -3,6 +3,13 @@ import { FirstPersonControls } from './FirstPersonControls';
 import { World } from '../world/World';
 import { BlockType } from '../world/BlockType';
 
+export interface RaycastResult {
+  position: THREE.Vector3;
+  normal: THREE.Vector3;
+  blockType: BlockType | null;
+  distance: number;
+}
+
 export class Player {
     public camera: THREE.PerspectiveCamera;
     private controls: FirstPersonControls;
@@ -17,6 +24,9 @@ export class Player {
     private readonly gravity = -20.0;
 
     private keys: { [key: string]: boolean } = {};
+    private raycaster: THREE.Raycaster;
+    private lastRaycastResult: RaycastResult | null = null;
+    private readonly RAYCAST_DISTANCE = 5; // Distancia máxima del rayo
 
     public constructor(camera: THREE.PerspectiveCamera, controls: FirstPersonControls, world: World) {
         this.camera = camera;
@@ -27,6 +37,8 @@ export class Player {
         this.velocity = new THREE.Vector3();
 
         this.initEventListeners();
+        this.raycaster = new THREE.Raycaster();
+        this.raycaster.far = this.RAYCAST_DISTANCE;
     }
 
     private initEventListeners() {
@@ -75,7 +87,96 @@ export class Player {
         return false;
     }
 
+    /**
+     * Realiza un raycast desde la cámara en la dirección de la mirada
+     * @returns Información sobre el bloque apuntado o null si no hay colisión
+     */
+    public raycast(): RaycastResult | null {
+        if (!this.world) {
+            console.log('Raycast: No world available');
+            return null;
+        }
+
+        // Configurar el rayo desde la cámara en la dirección de la mirada
+        const mouse = new THREE.Vector2(0, 0); // Centro de la pantalla
+        this.raycaster.setFromCamera(mouse, this.camera);
+        
+        // Obtener la dirección del rayo
+        const direction = new THREE.Vector3();
+        this.camera.getWorldDirection(direction);
+        
+        // Mostrar información de depuración
+        console.log('Camera position:', this.camera.position);
+        console.log('Ray direction:', direction);
+        
+        // Crear un rayo desde la posición de la cámara en la dirección de la mirada
+        const ray = new THREE.Ray(this.camera.position, direction);
+        
+        // Parámetros para el raycasting
+        const step = 0.1; // Tamaño del paso para el raycasting (más pequeño = más preciso pero más costoso)
+        const maxDistance = this.RAYCAST_DISTANCE;
+        
+        console.log(`Starting raycast from ${this.camera.position.x}, ${this.camera.position.y}, ${this.camera.position.z}`);
+        
+        // Realizar el raycasting manualmente para detectar bloques
+        for (let distance = 0; distance <= maxDistance; distance += step) {
+            // Calcular la posición actual del rayo
+            const position = new THREE.Vector3();
+            ray.at(distance, position);
+            
+            // Obtener la posición del bloque en coordenadas enteras
+            const blockPos = new THREE.Vector3(
+                Math.floor(position.x + 0.5 * Math.sign(direction.x)),
+                Math.floor(position.y + 0.5 * Math.sign(direction.y)),
+                Math.floor(position.z + 0.5 * Math.sign(direction.z))
+            );
+            
+            // Verificar si hay un bloque en esta posición
+            const blockType = this.world.getBlock(blockPos.x, blockPos.y, blockPos.z);
+            
+            console.log(`Checking block at ${blockPos.x}, ${blockPos.y}, ${blockPos.z}:`, 
+                       blockType !== undefined ? BlockType[blockType] : 'undefined');
+            
+            if (blockType !== undefined && blockType !== BlockType.AIR) {
+                // Calcular la normal de la cara del bloque
+                const normal = new THREE.Vector3(
+                    Math.round(position.x - blockPos.x),
+                    Math.round(position.y - blockPos.y),
+                    Math.round(position.z - blockPos.z)
+                );
+                
+                // Si la normal es cero (raro, pero por si acaso)
+                if (normal.lengthSq() === 0) normal.set(0, 1, 0);
+                
+                // Crear y devolver el resultado
+                const result: RaycastResult = {
+                    position: blockPos,
+                    normal: normal.normalize(),
+                    blockType,
+                    distance
+                };
+                
+                console.log('Block hit!', result);
+                this.lastRaycastResult = result;
+                return result;
+            }
+        }
+        
+        this.lastRaycastResult = null;
+        return null;
+    }
+    
+    /**
+     * Obtiene el resultado del último raycast realizado
+     */
+    public getLastRaycastResult(): RaycastResult | null {
+        return this.lastRaycastResult;
+    }
+
     public update(deltaTime: number): void {
+        // Actualizar el raycast en cada fotograma
+        this.raycast();
+        
         const forward = new THREE.Vector3();
         const right = new THREE.Vector3();
         this.controls.getDirection(forward, right);
