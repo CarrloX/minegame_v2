@@ -15,8 +15,13 @@ export class Chunk {
     // Indexed as [x + z * SIZE + y * SIZE * SIZE]
     private blocks: Uint8Array;
     private mesh: THREE.Mesh | null;
+    private transitionMesh: THREE.Mesh | null = null; // For LOD transitions
     public isDirty: boolean;
     private nonAirCount: number = 0; // Track number of non-air blocks for fast isEmpty()
+    private transitionProgress: number = 0; // 0-1 value for transition progress
+    private transitionStartTime: number = 0;
+    private transitionDuration: number = 300; // ms for transition
+    public currentLOD: 'detailed' | 'greedy' | 'transitioning' = 'detailed';
     
     // Pre-allocated typed arrays for mesh data
     private positionArray: Float32Array;
@@ -167,10 +172,97 @@ export class Chunk {
         this.isDirty = true;
     }
     
+    // Starts a transition to a new LOD level
+    public startTransitionToLOD(mode: 'detailed' | 'greedy'): void {
+        if (this.currentLOD === mode) return;
+        
+        // If already in transition, complete the current transition first
+        if (this.transitionMesh) {
+            this.completeTransition();
+        }
+        
+        // Move current mesh to transition mesh
+        this.transitionMesh = this.mesh;
+        this.mesh = null;
+        this.currentLOD = 'transitioning';
+        this.transitionProgress = 0;
+        this.transitionStartTime = performance.now();
+        
+        // Mark as dirty to force regeneration with new LOD
+        this.markDirty();
+    }
+    
+    // Updates the transition animation
+    public updateTransition(): boolean {
+        if (this.currentLOD !== 'transitioning') return false;
+        
+        const now = performance.now();
+        const elapsed = now - this.transitionStartTime;
+        this.transitionProgress = Math.min(elapsed / this.transitionDuration, 1);
+        
+        // Update material opacity for crossfade
+        if (this.mesh && this.transitionMesh) {
+            const newOpacity = this.transitionProgress;
+            const oldOpacity = 1 - newOpacity;
+            
+            const setOpacity = (material: THREE.Material | THREE.Material[], opacity: number) => {
+                if (Array.isArray(material)) {
+                    material.forEach(m => {
+                        if ('opacity' in m) m.opacity = opacity;
+                        m.transparent = opacity < 1;
+                    });
+                } else if ('opacity' in material) {
+                    material.opacity = opacity;
+                    material.transparent = opacity < 1;
+                }
+            };
+            
+            setOpacity(this.mesh.material, newOpacity);
+            setOpacity(this.transitionMesh.material, oldOpacity);
+        }
+        
+        // Transition complete
+        if (this.transitionProgress >= 1) {
+            this.completeTransition();
+            return false;
+        }
+        
+        return true;
+    }
+    
+    // Completes the current transition
+    private completeTransition(): void {
+        if (this.transitionMesh) {
+            // Dispose of the old mesh
+            if (this.transitionMesh.geometry) this.transitionMesh.geometry.dispose();
+            const ownedMaterial = this.transitionMesh.userData?.ownedMaterial || false;
+            if (ownedMaterial && this.transitionMesh.material) {
+                if (Array.isArray(this.transitionMesh.material)) {
+                    this.transitionMesh.material.forEach(m => m.dispose());
+                } else {
+                    (this.transitionMesh.material as THREE.Material).dispose();
+                }
+            }
+            this.transitionMesh = null;
+        }
+        
+        this.transitionProgress = 0;
+        this.currentLOD = this.mesh?.userData?.mode || 'detailed';
+    }
+    
     /**
      * Gets the chunk's mesh, creating it if necessary
      */
     public getMesh(mode: 'detailed' | 'greedy', world: import('./World').World): THREE.Mesh | null {
+        // If we're already in a transition, continue with it
+        if (this.currentLOD === 'transitioning' && this.mesh) {
+            return this.mesh;
+        }
+        
+        // If LOD mode is changing, start a transition
+        if (this.mesh && this.mesh.userData?.mode !== mode) {
+            this.startTransitionToLOD(mode);
+        }
         if (this.isDirty) {
             this.updateMesh(mode, world);
         }
@@ -182,19 +274,25 @@ export class Chunk {
      * Only disposes of materials that are owned by this chunk
      */
     public dispose(): void {
-        if (this.mesh) {
-            // Always dispose of the geometry
-            this.mesh.geometry.dispose();
+        const disposeMesh = (mesh: THREE.Mesh | null) => {
+            if (!mesh) return;
             
-            // Only dispose of materials if they are owned by this chunk
-            if (this.mesh.userData.ownedMaterial) {
-                if (Array.isArray(this.mesh.material)) {
-                    this.mesh.material.forEach(m => m.dispose());
-                } else if (this.mesh.material) {
-                    this.mesh.material.dispose();
+            if (mesh.geometry) mesh.geometry.dispose();
+            
+            // Only dispose of materials if this chunk owns them
+            const ownedMaterial = mesh.userData?.ownedMaterial || false;
+            if (ownedMaterial && mesh.material) {
+                if (Array.isArray(mesh.material)) {
+                    mesh.material.forEach(m => m.dispose());
+                } else {
+                    (mesh.material as THREE.Material).dispose();
                 }
             }
-        }
+        };
+        
+        disposeMesh(this.mesh);
+        disposeMesh(this.transitionMesh);
+        this.transitionMesh = null;
     }
     
     /**

@@ -323,18 +323,26 @@ export class World {
         if (!this.scene || !this.sharedMaterial) return;
         const chunkKey = this.getChunkKey(chunk.x, chunk.y, chunk.z);
         
-        // Verificar si el chunk ya tiene un mesh con un modo diferente
+        // Check if we need to update the LOD
         const existingMesh = this.chunkMeshes.get(chunkKey);
         const needsUpdate = !existingMesh || existingMesh.userData?.mode !== mode;
         
-        // Solo actualizar si es necesario
+        // Only update if necessary
         if (needsUpdate) {
-            this.removeChunkFromScene(chunk.x, chunk.y, chunk.z); // Remove old mesh if it exists
+            // If we already have a mesh, start a transition
+            if (existingMesh) {
+                chunk.startTransitionToLOD(mode);
+            }
+            
+            // Remove old mesh from scene but keep it in the chunk for transition
+            if (existingMesh) {
+                this.scene.remove(existingMesh);
+            }
             
             try {
                 console.log(`Generating ${mode} mesh for chunk [${chunk.x},${chunk.y},${chunk.z}]`);
-                // Forzar la actualización del mesh con el nuevo modo
-                chunk.markDirty();
+                
+                // Get the mesh (this will handle the transition if needed)
                 const mesh = chunk.getMesh(mode, this);
                 
                 if (mesh) {
@@ -348,9 +356,33 @@ export class World {
                     // Apply the shared material
                     const material = this.getMaterial();
                     if (material) {
-                        mesh.material = material;
+                        // For transitions, we need to clone the material to set individual opacity
+                        const clonedMaterial = this.cloneMaterialForTransition(material);
+                        mesh.material = clonedMaterial;
+                        
+                        // Add to scene and store reference
                         this.chunkMeshes.set(chunkKey, mesh);
                         this.scene.add(mesh);
+                        
+                        // If we have a transition mesh, add it to the scene too
+                        if (chunk['transitionMesh']) {
+                            const transitionMesh = chunk['transitionMesh'];
+                            const transitionMaterial = this.cloneMaterialForTransition(material);
+                            transitionMesh.material = transitionMaterial;
+                            this.scene.add(transitionMesh);
+                            
+                            // Set initial opacity for crossfade
+                            if ('opacity' in transitionMaterial) {
+                                transitionMaterial.opacity = 1.0;
+                                transitionMaterial.transparent = true;
+                            }
+                            
+                            // Set initial opacity for new mesh
+                            if ('opacity' in clonedMaterial) {
+                                (clonedMaterial as THREE.Material).opacity = 0.0;
+                                (clonedMaterial as THREE.Material).transparent = true;
+                            }
+                        }
                         
                         // Apply debug visualization if debug manager is available
                         if (this.debugManager) {
@@ -377,20 +409,73 @@ export class World {
         if (!this.scene) return;
         const chunkKey = this.getChunkKey(chunkX, chunkY, chunkZ);
         const mesh = this.chunkMeshes.get(chunkKey);
+        
         if (mesh) {
             // Remove from scene and map
             this.scene.remove(mesh);
             this.chunkMeshes.delete(chunkKey);
             
-            // Dispose of geometry and materials
-            if (mesh.geometry) {
-                mesh.geometry.dispose();
-            }
+            // Only dispose if this mesh is not part of an active transition
+            const chunk = this.chunks.get(chunkKey);
+            const isInTransition = chunk && chunk.currentLOD === 'transitioning';
             
-            if (Array.isArray(mesh.material)) {
-                mesh.material.forEach(material => material.dispose());
-            } else if (mesh.material) {
-                mesh.material.dispose();
+            if (!isInTransition) {
+                // Dispose of geometry and materials
+                if (mesh.geometry) {
+                    mesh.geometry.dispose();
+                }
+                
+                if (Array.isArray(mesh.material)) {
+                    mesh.material.forEach(material => material.dispose());
+                } else if (mesh.material) {
+                    mesh.material.dispose();
+                }
+            }
+        }
+    }
+    
+    // Creates a clone of a material for use in transitions
+    private cloneMaterialForTransition(baseMaterial: THREE.Material): THREE.Material | THREE.Material[] {
+        if (Array.isArray(baseMaterial)) {
+            return baseMaterial.map(m => this.cloneMaterialForTransition(m) as THREE.Material);
+        }
+        
+        // Create a clone of the material
+        const material = baseMaterial.clone();
+        
+        // Ensure the material can handle transparency
+        if ('opacity' in material) {
+            material.opacity = 1;
+            material.transparent = true;
+        }
+        
+        return material;
+    }
+    
+    // Updates all active LOD transitions
+    private updateLODTransitions(): void {
+        let needsUpdate = false;
+        
+        // Update all chunks that are in transition
+        for (const chunk of this.chunks.values()) {
+            if (chunk.currentLOD === 'transitioning') {
+                const wasUpdated = chunk['updateTransition'] ? chunk['updateTransition']() : false;
+                needsUpdate = needsUpdate || wasUpdated;
+                
+                // If transition is complete, clean up
+                if (chunk.currentLOD !== 'transitioning' && chunk['transitionMesh']) {
+                    this.scene?.remove(chunk['transitionMesh']);
+                    chunk['transitionMesh'] = null;
+                }
+            }
+        }
+        
+        // If any transitions were updated, request another frame
+        if (needsUpdate) {
+            // This assumes you have a way to request a render frame
+            // If using a game loop, this might not be necessary
+            if (typeof requestAnimationFrame === 'function') {
+                requestAnimationFrame(() => this.updateLODTransitions());
             }
         }
     }
@@ -398,6 +483,7 @@ export class World {
     public update(playerPosition: THREE.Vector3): void {
         this.loadChunksAroundPlayer(playerPosition);
         this.updateDirtyChunks();
+        this.updateLODTransitions();
     }
 
     /**
