@@ -254,44 +254,71 @@ export class Chunk {
                    this.getBlock(x, y, z - 1) !== BlockType.AIR;
         };
         
-        // Generar geometría para cada bloque
-        for (let x = 0; x < Chunk.SIZE; x++) {
+        // Generate geometry for each block
+        // Optimized loop order (y-z-x) for better memory locality
+        // This matches the memory layout of the block data array (x + z*SIZE + y*SIZE*SIZE)
+        for (let y = 0; y < Chunk.HEIGHT; y++) {
             for (let z = 0; z < Chunk.SIZE; z++) {
-                for (let y = 0; y < Chunk.HEIGHT; y++) {
+                for (let x = 0; x < Chunk.SIZE; x++) {
                     const blockType = this.getBlock(x, y, z);
                     if (blockType === BlockType.AIR) continue;
                     if (isBlockHidden(x, y, z)) continue;
 
                     const px = x, py = y, pz = z;
 
-                    const frontBlock = (z === Chunk.SIZE - 1) ? world.getBlock(this.x * Chunk.SIZE + x, this.y * Chunk.HEIGHT + y, this.z * Chunk.SIZE + z + 1) : this.getBlock(x, y, z + 1);
+                    // Check adjacent blocks and add faces as needed
+                    // Front face (z+1)
+                    const frontBlock = (z === Chunk.SIZE - 1) 
+                        ? world.getBlock(this.x * Chunk.SIZE + x, this.y * Chunk.HEIGHT + y, this.z * Chunk.SIZE + z + 1) 
+                        : this.getBlock(x, y, z + 1);
                     if (frontBlock === BlockType.AIR) {
-                        addFace([px, py, pz + 1, px + 1, py, pz + 1, px + 1, py + 1, pz + 1, px, py + 1, pz + 1], [0, 0, 1], blockType, 'front');
+                        addFace([px, py, pz + 1, px + 1, py, pz + 1, px + 1, py + 1, pz + 1, px, py + 1, pz + 1], 
+                               [0, 0, 1], blockType, 'front');
                     }
 
-                    const backBlock = (z === 0) ? world.getBlock(this.x * Chunk.SIZE + x, this.y * Chunk.HEIGHT + y, this.z * Chunk.SIZE + z - 1) : this.getBlock(x, y, z - 1);
+                    // Back face (z-1)
+                    const backBlock = (z === 0) 
+                        ? world.getBlock(this.x * Chunk.SIZE + x, this.y * Chunk.HEIGHT + y, this.z * Chunk.SIZE + z - 1) 
+                        : this.getBlock(x, y, z - 1);
                     if (backBlock === BlockType.AIR) {
-                        addFace([px + 1, py, pz, px, py, pz, px, py + 1, pz, px + 1, py + 1, pz], [0, 0, -1], blockType, 'back');
+                        addFace([px + 1, py, pz, px, py, pz, px, py + 1, pz, px + 1, py + 1, pz], 
+                              [0, 0, -1], blockType, 'back');
                     }
 
-                    const rightBlock = (x === Chunk.SIZE - 1) ? world.getBlock(this.x * Chunk.SIZE + x + 1, this.y * Chunk.HEIGHT + y, this.z * Chunk.SIZE + z) : this.getBlock(x + 1, y, z);
+                    // Right face (x+1)
+                    const rightBlock = (x === Chunk.SIZE - 1) 
+                        ? world.getBlock(this.x * Chunk.SIZE + x + 1, this.y * Chunk.HEIGHT + y, this.z * Chunk.SIZE + z) 
+                        : this.getBlock(x + 1, y, z);
                     if (rightBlock === BlockType.AIR) {
-                        addFace([px + 1, py, pz + 1, px + 1, py, pz, px + 1, py + 1, pz, px + 1, py + 1, pz + 1], [1, 0, 0], blockType, 'right');
+                        addFace([px + 1, py, pz + 1, px + 1, py, pz, px + 1, py + 1, pz, px + 1, py + 1, pz + 1], 
+                              [1, 0, 0], blockType, 'right');
                     }
 
-                    const leftBlock = (x === 0) ? world.getBlock(this.x * Chunk.SIZE + x - 1, this.y * Chunk.HEIGHT + y, this.z * Chunk.SIZE + z) : this.getBlock(x - 1, y, z);
+                    // Left face (x-1)
+                    const leftBlock = (x === 0) 
+                        ? world.getBlock(this.x * Chunk.SIZE + x - 1, this.y * Chunk.HEIGHT + y, this.z * Chunk.SIZE + z) 
+                        : this.getBlock(x - 1, y, z);
                     if (leftBlock === BlockType.AIR) {
-                        addFace([px, py, pz, px, py, pz + 1, px, py + 1, pz + 1, px, py + 1, pz], [-1, 0, 0], blockType, 'left');
+                        addFace([px, py, pz, px, py, pz + 1, px, py + 1, pz + 1, px, py + 1, pz], 
+                              [-1, 0, 0], blockType, 'left');
                     }
 
-                    const topBlock = (y === Chunk.HEIGHT - 1) ? world.getBlock(this.x * Chunk.SIZE + x, this.y * Chunk.HEIGHT + y + 1, this.z * Chunk.SIZE + z) : this.getBlock(x, y + 1, z);
+                    // Top face (y+1)
+                    const topBlock = (y === Chunk.HEIGHT - 1) 
+                        ? world.getBlock(this.x * Chunk.SIZE + x, this.y * Chunk.HEIGHT + y + 1, this.z * Chunk.SIZE + z) 
+                        : this.getBlock(x, y + 1, z);
                     if (topBlock === BlockType.AIR) {
-                        addFace([px, py + 1, pz, px, py + 1, pz + 1, px + 1, py + 1, pz + 1, px + 1, py + 1, pz], [0, 1, 0], blockType, 'top');
+                        addFace([px, py + 1, pz, px, py + 1, pz + 1, px + 1, py + 1, pz + 1, px + 1, py + 1, pz], 
+                              [0, 1, 0], blockType, 'top');
                     }
 
-                    const bottomBlock = (y === 0) ? world.getBlock(this.x * Chunk.SIZE + x, this.y * Chunk.HEIGHT + y - 1, this.z * Chunk.SIZE + z) : this.getBlock(x, y - 1, z);
+                    // Bottom face (y-1)
+                    const bottomBlock = (y === 0) 
+                        ? world.getBlock(this.x * Chunk.SIZE + x, this.y * Chunk.HEIGHT + y - 1, this.z * Chunk.SIZE + z) 
+                        : this.getBlock(x, y - 1, z);
                     if (bottomBlock === BlockType.AIR) {
-                        addFace([px, py, pz, px + 1, py, pz, px + 1, py, pz + 1, px, py, pz + 1], [0, -1, 0], blockType, 'bottom');
+                        addFace([px, py, pz, px + 1, py, pz, px + 1, py, pz + 1, px, py, pz + 1], 
+                              [0, -1, 0], blockType, 'bottom');
                     }
                 }
             }
