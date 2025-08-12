@@ -8,7 +8,6 @@ export class Renderer {
     private scene: THREE.Scene;
     private camera: THREE.PerspectiveCamera;
     private renderer: THREE.WebGLRenderer;
-    private clock: THREE.Clock;
     private crosshairManager: CrosshairManager;
 
     /**
@@ -50,8 +49,6 @@ export class Renderer {
         // Add lights
         this.setupLights();
         
-        // Set up clock for frame timing
-        this.clock = new THREE.Clock();
         
         // Initialize crosshair manager
         this.crosshairManager = new CrosshairManager(this.renderer);

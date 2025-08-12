@@ -2,14 +2,65 @@ import * as THREE from 'three';
 import { World } from '../world/World';
 import { BlockType } from '../world/BlockType';
 
+// Clase auxiliar para crear líneas con ancho consistente usando mallas
+export class FatLine {
+  public mesh: THREE.Mesh;
+  private width: number;
+  private start: THREE.Vector3;
+  private end: THREE.Vector3;
+
+  constructor(start: THREE.Vector3, end: THREE.Vector3, width: number, material: THREE.Material) {
+    this.width = width;
+    this.start = start.clone();
+    this.end = end.clone();
+    
+    const direction = new THREE.Vector3().subVectors(end, start);
+    const length = direction.length();
+    const center = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
+    
+    const geometry = new THREE.BoxGeometry(length, width, width);
+    this.mesh = new THREE.Mesh(geometry, material);
+    
+    // Orientar y posicionar la malla
+    this.mesh.position.copy(center);
+    this.mesh.lookAt(end);
+    // Rotar 90 grados en el eje Y para alinear con la dirección
+    this.mesh.rotateY(Math.PI / 2);
+  }
+
+  public update(start: THREE.Vector3, end: THREE.Vector3): void {
+    this.start.copy(start);
+    this.end.copy(end);
+    
+    const direction = new THREE.Vector3().subVectors(end, start);
+    const length = direction.length();
+    const center = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
+    
+    // Actualizar geometría
+    const geometry = new THREE.BoxGeometry(length, this.width, this.width);
+    this.mesh.geometry.dispose();
+    this.mesh.geometry = geometry;
+    
+    // Actualizar posición y rotación
+    this.mesh.position.copy(center);
+    this.mesh.lookAt(end);
+    this.mesh.rotateY(Math.PI / 2);
+  }
+
+  public dispose(): void {
+    this.mesh.geometry.dispose();
+  }
+}
+
 export class BlockOutlineHelper {
   private scene: THREE.Scene;
   private world: World;
-
-  private highlightBox: THREE.LineSegments | null = null;
-  private edgeMaterial: THREE.LineBasicMaterial;
   private size = 0.5; // exact half-block
-  private geometry: THREE.BufferGeometry | null = null;
+  
+  // Elementos de renderizado
+  private highlightBox: THREE.Group | null = null;
+  private edgeMaterial: THREE.MeshBasicMaterial;
+  private fatLines: FatLine[] = [];
   private faceRanges: { start: number; count: number }[] = [];
   
   // Variables temporales para evitar crear nuevos objetos en el bucle de actualización
@@ -33,6 +84,22 @@ export class BlockOutlineHelper {
     this.scene = scene;
     this.world = world;
     
+    // Inicializar el grupo principal
+    this.highlightBox = new THREE.Group();
+    this.highlightBox.visible = false;
+    this.highlightBox.renderOrder = 1;
+    this.highlightBox.matrixAutoUpdate = true;
+    
+    // Crear el material para las líneas gruesas
+    this.edgeMaterial = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 1.0,
+      depthTest: true,
+      depthWrite: true,
+      side: THREE.DoubleSide
+    });
+    
     // Predicado por defecto que usa la lógica actual
     this.visibilityPredicate = (_, neighborType) => {
       // undefined o AIR se consideran vacíos
@@ -42,16 +109,7 @@ export class BlockOutlineHelper {
       // en otro caso, es sólido
       return false;
     };
-    this.edgeMaterial = new THREE.LineBasicMaterial({
-      color,
-      transparent: true,
-      opacity: 1.0, // Aumentar opacidad
-      depthTest: true,  // Habilitar depth test
-      depthWrite: true, // Habilitar escritura de profundidad
-      toneMapped: false,
-      linewidth: 2     // Asegurar que las líneas sean visibles
-    });
-
+    
     this.initializeHighlightBox();
   }
 
@@ -127,61 +185,79 @@ export class BlockOutlineHelper {
   // Inicialización
   // -------------------
   private initializeHighlightBox(): void {
-    const s = this.size;
-    // 8 vértices del cubo
-    const vertices = [
-      -s, -s, -s,  // 0
-       s, -s, -s,  // 1
-       s, -s,  s,  // 2
-      -s, -s,  s,  // 3
-      -s,  s, -s,  // 4
-       s,  s, -s,  // 5
-       s,  s,  s,  // 6
-      -s,  s,  s   // 7
-    ];
-
-    // Índices para los 12 segmentos (2 vértices por arista, 4 aristas por cara, 6 caras)
-    // Cada grupo de 2 índices forma un segmento de línea
-    const indices = [
-      // bottom (y-)
-      0, 1,  1, 2,  2, 3,  3, 0,
-      // top (y+)
-      4, 5,  5, 6,  6, 7,  7, 4,
-      // sides
-      0, 4,  1, 5,  2, 6,  3, 7
-    ];
-
-    // Crear la geometría
-    this.geometry = new THREE.BufferGeometry();
-    this.geometry.setIndex(indices);
-    this.geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-
-    // Crear el material
-    this.edgeMaterial = new THREE.LineBasicMaterial({
-      color: 0x000000,
-      transparent: true,
-      opacity: 1.0,
-      depthTest: true,
-      depthWrite: true,
-      linewidth: 2
-    });
-
-    // Crear el LineSegments
-    this.highlightBox = new THREE.LineSegments(this.geometry, this.edgeMaterial);
-    this.highlightBox.visible = false;
-    this.highlightBox.renderOrder = 1;
-    this.highlightBox.matrixAutoUpdate = true;
-
-    // Definir los rangos de dibujo para cada cara
-    // Cada cara tiene 4 segmentos (8 índices)
-    for (let i = 0; i < 6; i++) {
-      this.faceRanges.push({
-        start: i * 8,
-        count: 8
-      });
+    if (!this.highlightBox) {
+      this.highlightBox = new THREE.Group();
+      this.highlightBox.visible = false;
+      this.highlightBox.renderOrder = 1;
+      this.highlightBox.matrixAutoUpdate = true;
     }
 
-    this.scene.add(this.highlightBox);
+    const s = this.size;
+    // Definir los vértices del cubo
+    const corners = [
+      new THREE.Vector3(-s, -s, -s), // 0
+      new THREE.Vector3(s, -s, -s),  // 1
+      new THREE.Vector3(s, -s, s),   // 2
+      new THREE.Vector3(-s, -s, s),  // 3
+      new THREE.Vector3(-s, s, -s),  // 4
+      new THREE.Vector3(s, s, -s),   // 5
+      new THREE.Vector3(s, s, s),    // 6
+      new THREE.Vector3(-s, s, s)    // 7
+    ];
+
+    // Definir las aristas del cubo (pares de índices de vértices)
+    const edges = [
+      // bottom (y-)
+      [0, 1], [1, 2], [2, 3], [3, 0],
+      // top (y+)
+      [4, 5], [5, 6], [6, 7], [7, 4],
+      // sides
+      [0, 4], [1, 5], [2, 6], [3, 7]
+    ];
+
+    // Limpiar líneas existentes
+    this.fatLines.forEach(line => line.dispose());
+    this.fatLines = [];
+    this.faceRanges = [];
+    
+    // Limpiar grupos existentes
+    while (this.highlightBox.children.length > 0) {
+      const child = this.highlightBox.children[0];
+      this.highlightBox.remove(child);
+    }
+
+    const lineWidth = 0.01; // Ancho de las líneas (reducido de 0.03 a 0.01)
+    
+    // Crear 6 grupos (uno por cara)
+    for (let i = 0; i < 6; i++) {
+      const group = new THREE.Group();
+      this.faceRanges.push({
+        start: i * 4,
+        count: 4
+      });
+      this.highlightBox.add(group);
+    }
+
+    // Crear las líneas gruesas
+    for (let i = 0; i < edges.length; i++) {
+      const [startIdx, endIdx] = edges[i];
+      const start = corners[startIdx];
+      const end = corners[endIdx];
+      
+      // Determinar a qué grupo pertenece esta arista
+      const groupIdx = Math.floor(i / 4); // 4 aristas por cara
+      const group = this.highlightBox.children[groupIdx] as THREE.Group;
+      
+      // Crear la línea gruesa
+      const line = new FatLine(start, end, lineWidth, this.edgeMaterial);
+      this.fatLines.push(line);
+      group.add(line.mesh);
+    }
+
+    // Asegurarse de que el highlightBox esté en la escena
+    if (this.highlightBox.parent !== this.scene) {
+      this.scene.add(this.highlightBox);
+    }
   }
 
   // -------------------
@@ -192,7 +268,7 @@ export class BlockOutlineHelper {
    * position: punto en el mundo (puede ser coordenadas flotantes), se hace snap a entero.
    */
   public updateHighlightBox(position: THREE.Vector3 | null): void {
-    if (!this.highlightBox || !this.geometry) return;
+    if (!this.highlightBox) return;
 
     if (!position) {
       this.highlightBox.visible = false;
@@ -248,12 +324,15 @@ export class BlockOutlineHelper {
       }
     }
 
-    // Actualizar la geometría con los rangos visibles
-    if (anyVisible && drawRanges.length > 0) {
-      // Combinar todos los rangos en uno solo
-      const start = Math.min(...drawRanges.map(r => r.start));
-      const end = Math.max(...drawRanges.map(r => r.start + r.count));
-      this.geometry.setDrawRange(start, end - start);
+    // Actualizar visibilidad de los grupos de caras
+    if (this.highlightBox) {
+      for (let i = 0; i < this.highlightBox.children.length; i++) {
+        const group = this.highlightBox.children[i] as THREE.Group;
+        const isVisible = drawRanges.some(range => 
+          i * 4 >= range.start && i * 4 < range.start + range.count
+        );
+        group.visible = isVisible;
+      }
     }
 
     const EPS = 0.001; // Pequeño offset para evitar z-fighting
@@ -268,15 +347,19 @@ export class BlockOutlineHelper {
   // Utilidades estéticas
   // -------------------
   public setColor(hex: number, opacity = 0.95) {
-    this.edgeMaterial.color.setHex(hex);
-    this.edgeMaterial.opacity = opacity;
-    this.edgeMaterial.needsUpdate = true;
+    if (this.edgeMaterial) {
+      this.edgeMaterial.color.setHex(hex);
+      this.edgeMaterial.opacity = opacity;
+      this.edgeMaterial.needsUpdate = true;
+    }
   }
 
   public pulse(time: number) {
-    const pulse = 0.5 + 0.5 * Math.sin(time * 6);
-    this.edgeMaterial.opacity = 0.5 + 0.5 * pulse;
-    this.edgeMaterial.needsUpdate = true;
+    if (this.edgeMaterial) {
+      const pulse = 0.5 + 0.5 * Math.sin(time * 6);
+      this.edgeMaterial.opacity = 0.5 + 0.5 * pulse;
+      this.edgeMaterial.needsUpdate = true;
+    }
   }
 
   // -------------------
@@ -284,18 +367,20 @@ export class BlockOutlineHelper {
   // -------------------
   public dispose(): void {
     if (!this.highlightBox) return;
-    this.scene.remove(this.highlightBox);
-
-    if (this.geometry) {
-      this.geometry.dispose();
-      this.geometry = null;
+    
+    // Eliminar todas las líneas gruesas
+    for (const line of this.fatLines) {
+      line.dispose();
     }
+    this.fatLines = [];
+    
+    this.scene.remove(this.highlightBox);
 
     if (this.edgeMaterial) {
       this.edgeMaterial.dispose();
     }
 
-    this.highlightBox = null;
+    (this.highlightBox as any) = null;
     this.faceRanges = [];
   }
 }

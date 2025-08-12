@@ -17,7 +17,7 @@ class GreedyMesherWorker {
     // add more as needed
   };
 
-  private static getFaceUVs(blockType: number, face: 'top'|'bottom'|'side', wTiles = 1, hTiles = 1): number[] {
+  private static getFaceUVs(blockType: number, face: 'top'|'bottom'|'side', _wTiles = 1, _hTiles = 1): number[] {
     const map = this.TILE_MAP[blockType] || { top: [0,0], side: [0,0], bottom: [0,0] };
     const tile = (face === 'top') ? map.top : (face === 'bottom' ? map.bottom : map.side);
     const uTile = tile[0], vTile = tile[1];
@@ -46,7 +46,7 @@ class GreedyMesherWorker {
     chunkY: number,
     chunkZ: number,
     worldGetBlock?: (x:number,y:number,z:number)=>number|undefined,
-    debug = false
+    _debug = false
   ) : {
     positions: Float32Array;
     normals: Float32Array;

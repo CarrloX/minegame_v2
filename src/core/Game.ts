@@ -52,9 +52,9 @@ export class Game {
     
     /**
      * Updates the game state
-     * @param deltaTime - Time in seconds since the last update
+     * @param _deltaTime - Time in seconds since the last update
      */
-    private update(deltaTime: number): void {
+    private update(_deltaTime: number): void {
         // Update the world (this will handle chunk updates)
         this.world.update(this.player.position);
         
@@ -204,7 +204,7 @@ export class Game {
                 camera,
                 {
                     mode: 'accurate',
-                    onColorChange: (isLight: boolean, brightness: number) => {
+                    onColorChange: (isLight: boolean) => {
                         const root = document.documentElement;
                         if (isLight) {
                             root.style.setProperty('--crosshair-color', 'rgba(0, 0, 0, 0.8)');
