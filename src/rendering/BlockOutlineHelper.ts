@@ -3,11 +3,7 @@ import { World } from '../world/World';
 import { BlockType } from '../world/BlockType';
 
 // Shared geometry for all edge instances (unit box along X axis)
-const EDGE_GEOMETRY = (() => {
-  const geometry = new THREE.BoxGeometry(1, 1, 1);
-  geometry.translate(0.5, 0, 0); // Center the box at origin
-  return geometry;
-})();
+const EDGE_GEOMETRY = new THREE.BoxGeometry(1, 1, 1);
 
 // Maximum number of edges in a cube
 const MAX_EDGES = 12;
@@ -168,38 +164,32 @@ export class BlockOutlineHelper {
   private initializeHighlightBox(): void {
     if (!this.highlightBox) return;
     
-    // Define cube corners in local space (centered at origin)
-    const s = 0.5; // Fixed size to ensure proper cube dimensions
-    this.size = s; // Update the size property
-    const corners = [
-      new THREE.Vector3(-s, -s, -s), // 0
-      new THREE.Vector3(s, -s, -s),  // 1
-      new THREE.Vector3(s, -s, s),   // 2
-      new THREE.Vector3(-s, -s, s),  // 3
-      new THREE.Vector3(-s, s, -s),  // 4
-      new THREE.Vector3(s, s, -s),   // 5
-      new THREE.Vector3(s, s, s),    // 6
-      new THREE.Vector3(-s, s, s)    // 7
+    // Define cube dimensions
+    const s = 0.5; // Half of block size (1x1x1 cube)
+    const lineWidth = 0.01; // Thickness of the outline
+    
+    // Define the 12 edges of the cube
+    const edges = [
+      // Bottom face
+      { start: new THREE.Vector3(-s, -s, -s), end: new THREE.Vector3(s, -s, -s) },
+      { start: new THREE.Vector3(s, -s, -s), end: new THREE.Vector3(s, -s, s) },
+      { start: new THREE.Vector3(s, -s, s), end: new THREE.Vector3(-s, -s, s) },
+      { start: new THREE.Vector3(-s, -s, s), end: new THREE.Vector3(-s, -s, -s) },
+      // Top face
+      { start: new THREE.Vector3(-s, s, -s), end: new THREE.Vector3(s, s, -s) },
+      { start: new THREE.Vector3(s, s, -s), end: new THREE.Vector3(s, s, s) },
+      { start: new THREE.Vector3(s, s, s), end: new THREE.Vector3(-s, s, s) },
+      { start: new THREE.Vector3(-s, s, s), end: new THREE.Vector3(-s, s, -s) },
+      // Vertical edges
+      { start: new THREE.Vector3(-s, -s, -s), end: new THREE.Vector3(-s, s, -s) },
+      { start: new THREE.Vector3(s, -s, -s), end: new THREE.Vector3(s, s, -s) },
+      { start: new THREE.Vector3(s, -s, s), end: new THREE.Vector3(s, s, s) },
+      { start: new THREE.Vector3(-s, -s, s), end: new THREE.Vector3(-s, s, s) }
     ];
     
-    // Define edge connections (pairs of vertex indices)
-    const edges = [
-      // Bottom face (y-)
-      [0, 1], [1, 2], [2, 3], [3, 0],
-      // Top face (y+)
-      [4, 5], [5, 6], [6, 7], [7, 4],
-      // Vertical edges
-      [0, 4], [1, 5], [2, 6], [3, 7]
-    ];
-
-    // Use the edges defined above
-
-    // Pre-calculate edge matrices
-    const lineWidth = 0.01;
+    // Calculate the transformation matrix for each edge
     for (let i = 0; i < edges.length && i < this.edgeMatrices.length; i++) {
-      const [startIdx, endIdx] = edges[i];
-      const start = corners[startIdx];
-      const end = corners[endIdx];
+      const { start, end } = edges[i];
       
       // Calculate direction and length
       this.tmpDir.subVectors(end, start);
@@ -211,13 +201,16 @@ export class BlockOutlineHelper {
       this.tmpCenter.addVectors(start, end).multiplyScalar(0.5);
       
       // Calculate rotation to align with edge
-      const dirNormalized = this.tmpDir.normalize();
-      this.tmpQuaternion.setFromUnitVectors(this.xAxis, dirNormalized);
+      this.tmpDir.normalize();
+      this.tmpQuaternion.setFromUnitVectors(
+        new THREE.Vector3(1, 0, 0), // Original direction of the edge geometry
+        this.tmpDir.clone()         // Desired direction
+      );
       
       // Set scale (length, width, width)
       this.tmpScale.set(length, lineWidth, lineWidth);
       
-      // Create and store matrix
+      // Create and store the transformation matrix
       this.edgeMatrices[i].compose(
         this.tmpCenter,
         this.tmpQuaternion,
