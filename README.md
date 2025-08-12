@@ -66,4 +66,4 @@ Este proyecto está bajo la Licencia MIT. Ver el archivo [LICENSE](LICENSE) para
 
 ---
 
-Desarrollado con ❤️ por [Tu Nombre] | [2025]
+Desarrollado con ❤️ por [Carlox] | [2025]
