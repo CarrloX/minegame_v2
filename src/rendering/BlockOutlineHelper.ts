@@ -6,10 +6,11 @@ export class BlockOutlineHelper {
   private scene: THREE.Scene;
   private world: World;
 
-  private highlightBox: THREE.Group | null = null;
-  private faceGroups: THREE.Group[] = []; // 6 groups, one per face
+  private highlightBox: THREE.LineSegments | null = null;
   private edgeMaterial: THREE.LineBasicMaterial;
   private size = 0.5; // exact half-block
+  private geometry: THREE.BufferGeometry | null = null;
+  private faceRanges: { start: number; count: number }[] = [];
 
   // Configurables
   private ignoredBlockTypes: Set<number> = new Set();            // si el bloque objetivo está en este set => no dibujar
@@ -68,47 +69,58 @@ export class BlockOutlineHelper {
   // Inicialización
   // -------------------
   private initializeHighlightBox(): void {
-    this.highlightBox = new THREE.Group();
-    this.highlightBox.visible = false;
-    this.highlightBox.renderOrder = 1; // Valor bajo para que se dibuje antes
-    this.highlightBox.matrixAutoUpdate = true; // Permitir actualización automática
-
     const s = this.size;
-    const corners = [
-      new THREE.Vector3(-s, -s, -s), // 0
-      new THREE.Vector3( s, -s, -s), // 1
-      new THREE.Vector3( s, -s,  s), // 2
-      new THREE.Vector3(-s, -s,  s), // 3
-      new THREE.Vector3(-s,  s, -s), // 4
-      new THREE.Vector3( s,  s, -s), // 5
-      new THREE.Vector3( s,  s,  s), // 6
-      new THREE.Vector3(-s,  s,  s)  // 7
+    // 8 vértices del cubo
+    const vertices = [
+      -s, -s, -s,  // 0
+       s, -s, -s,  // 1
+       s, -s,  s,  // 2
+      -s, -s,  s,  // 3
+      -s,  s, -s,  // 4
+       s,  s, -s,  // 5
+       s,  s,  s,  // 6
+      -s,  s,  s   // 7
     ];
 
-    // Coincide con los checks que usaremos en update (ver abajo)
-    const faceCornerIndices: number[][] = [
-      [0,1,2,3], // bottom (y-)
-      [7,6,5,4], // top (y+)
-      [0,3,7,4], // left (x-)
-      [1,5,6,2], // right (x+)
-      [3,2,6,7], // front (z+)
-      [0,4,5,1]  // back (z-)
+    // Índices para los 12 segmentos (2 vértices por arista, 4 aristas por cara, 6 caras)
+    // Cada grupo de 2 índices forma un segmento de línea
+    const indices = [
+      // bottom (y-)
+      0, 1,  1, 2,  2, 3,  3, 0,
+      // top (y+)
+      4, 5,  5, 6,  6, 7,  7, 4,
+      // sides
+      0, 4,  1, 5,  2, 6,  3, 7
     ];
 
-    this.faceGroups = [];
-    for (let f = 0; f < faceCornerIndices.length; f++) {
-      const group = new THREE.Group();
-      const idx = faceCornerIndices[f];
-      for (let i = 0; i < 4; i++) {
-        const a = corners[idx[i]];
-        const b = corners[idx[(i + 1) % 4]];
-        const geo = new THREE.BufferGeometry().setFromPoints([a.clone(), b.clone()]);
-        const line = new THREE.Line(geo, this.edgeMaterial);
-        group.add(line);
-      }
-      group.visible = false;
-      this.faceGroups.push(group);
-      this.highlightBox.add(group);
+    // Crear la geometría
+    this.geometry = new THREE.BufferGeometry();
+    this.geometry.setIndex(indices);
+    this.geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+
+    // Crear el material
+    this.edgeMaterial = new THREE.LineBasicMaterial({
+      color: 0x000000,
+      transparent: true,
+      opacity: 1.0,
+      depthTest: true,
+      depthWrite: true,
+      linewidth: 2
+    });
+
+    // Crear el LineSegments
+    this.highlightBox = new THREE.LineSegments(this.geometry, this.edgeMaterial);
+    this.highlightBox.visible = false;
+    this.highlightBox.renderOrder = 1;
+    this.highlightBox.matrixAutoUpdate = true;
+
+    // Definir los rangos de dibujo para cada cara
+    // Cada cara tiene 4 segmentos (8 índices)
+    for (let i = 0; i < 6; i++) {
+      this.faceRanges.push({
+        start: i * 8,
+        count: 8
+      });
     }
 
     this.scene.add(this.highlightBox);
@@ -122,7 +134,7 @@ export class BlockOutlineHelper {
    * position: punto en el mundo (puede ser coordenadas flotantes), se hace snap a entero.
    */
   public updateHighlightBox(position: THREE.Vector3 | null): void {
-    if (!this.highlightBox) return;
+    if (!this.highlightBox || !this.geometry) return;
 
     if (!position) {
       this.highlightBox.visible = false;
@@ -148,16 +160,12 @@ export class BlockOutlineHelper {
     // Helper para decidir si un vecino se considera "vacío" a efectos del outline
     const neighborIsEmptyForOutline = (nx: number, ny: number, nz: number): boolean => {
       const neighbor = this.world.getBlock(nx, ny, nz);
-      // undefined o AIR se consideran vacíos
       if (neighbor === undefined || neighbor === BlockType.AIR) return true;
-      // Si el vecino está en transparentNeighborTypes, también consideramos vacío
       if (this.transparentNeighborTypes.has(neighbor)) return true;
-      // en otro caso, es sólido
       return false;
     };
 
-    // Orden de checks debe corresponder con faceGroups:
-    // bottom, top, left, right, front, back
+    // Orden de checks: bottom, top, left, right, front, back
     const faceChecks: [number, number, number][] = [
       [0,-1,0], // bottom (y-)
       [0, 1,0], // top    (y+)
@@ -167,17 +175,31 @@ export class BlockOutlineHelper {
       [0, 0,-1] // back   (z-)
     ];
 
+    // Crear un array con los rangos de dibujo visibles
+    const drawRanges: { start: number; count: number }[] = [];
     let anyVisible = false;
-    for (let f = 0; f < this.faceGroups.length; f++) {
+
+    for (let f = 0; f < faceChecks.length; f++) {
       const [dx, dy, dz] = faceChecks[f];
       const nx = blockX + dx;
       const ny = blockY + dy;
       const nz = blockZ + dz;
-      const visible = neighborIsEmptyForOutline(nx, ny, nz);
-      this.faceGroups[f].visible = visible;
-      anyVisible = anyVisible || visible;
+      
+      if (neighborIsEmptyForOutline(nx, ny, nz)) {
+        drawRanges.push(this.faceRanges[f]);
+        anyVisible = true;
+      }
     }
-    const EPS = 0.001; // Reducir el offset para que no sea tan notorio
+
+    // Actualizar la geometría con los rangos visibles
+    if (anyVisible && drawRanges.length > 0) {
+      // Combinar todos los rangos en uno solo
+      const start = Math.min(...drawRanges.map(r => r.start));
+      const end = Math.max(...drawRanges.map(r => r.start + r.count));
+      this.geometry.setDrawRange(start, end - start);
+    }
+
+    const EPS = 0.001; // Pequeño offset para evitar z-fighting
     this.highlightBox.scale.set(1 + EPS, 1 + EPS, 1 + EPS);
     this.highlightBox.visible = anyVisible;
     this.onHighlightChange?.(new THREE.Vector3(blockX, blockY, blockZ));
@@ -205,17 +227,16 @@ export class BlockOutlineHelper {
     if (!this.highlightBox) return;
     this.scene.remove(this.highlightBox);
 
-    // dispose geometries; material es compartido y se libera aquí
-    this.faceGroups.forEach(group => {
-      group.children.forEach(child => {
-        const line = child as THREE.Line;
-        line.geometry.dispose();
-        // no dispose del material por child (compartido)
-      });
-    });
+    if (this.geometry) {
+      this.geometry.dispose();
+      this.geometry = null;
+    }
 
-    this.edgeMaterial.dispose();
-    this.faceGroups = [];
+    if (this.edgeMaterial) {
+      this.edgeMaterial.dispose();
+    }
+
     this.highlightBox = null;
+    this.faceRanges = [];
   }
 }
