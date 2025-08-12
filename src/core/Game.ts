@@ -6,6 +6,7 @@ import { DebugManager } from '../debug/DebugManager';
 import { CrosshairManager } from '../ui/CrosshairManager';
 import { BlockType } from '../world/BlockType';
 import { BlockOutlineHelper } from '../rendering/BlockOutlineHelper';
+import { BlockInteraction } from '../player/BlockInteraction';
 
 export class Game {
     private renderer: Renderer;
@@ -18,6 +19,7 @@ export class Game {
     private animationFrameId: number | null = null;
     private hoveredBlock: { position: THREE.Vector3; originalType: BlockType } | null = null;
     private blockOutlineHelper: BlockOutlineHelper | null = null;
+    private blockInteraction: BlockInteraction | null = null;
 
     /**
      * Creates an instance of Game
@@ -38,6 +40,14 @@ export class Game {
         // Initialize block outline helper
         this.blockOutlineHelper = new BlockOutlineHelper(this.renderer.getScene(), this.world);
         
+        // Initialize block interaction for block destruction
+        this.blockInteraction = new BlockInteraction(
+            this.player,
+            this.world,
+            this.renderer.getRenderer().domElement
+        );
+        // Event listeners are initialized in the BlockInteraction constructor
+        
         // Bind the game loop to maintain 'this' context
         this.gameLoop = this.gameLoop.bind(this);
     }
@@ -55,11 +65,17 @@ export class Game {
      * @param _deltaTime - Time in seconds since the last update
      */
     private update(_deltaTime: number): void {
-        // Update the world (this will handle chunk updates)
+        // Update the world (this will handle chunk loading/unloading)
         this.world.update(this.player.position);
         
-        // Actualizar el raycast y resaltar el bloque apuntado
+        // Force update all dirty chunks immediately
+        this.world.updateDirtyChunks();
+        
+        // Update block highlighting and raycasting
         this.updateBlockHighlighting();
+        
+        // Force a render update to ensure changes are visible
+        this.renderer.render();
     }
     
     /**
@@ -69,12 +85,9 @@ export class Game {
         // Get the raycast result
         const raycastResult = this.player.getLastRaycastResult();
         
-        console.log('Raycast result:', raycastResult);
-        
         // If there was a previously highlighted block that's no longer being targeted, restore it
         if (this.hoveredBlock) {
             if (!raycastResult || !this.hoveredBlock.position.equals(raycastResult.position)) {
-                console.log('Restoring previously highlighted block at:', this.hoveredBlock.position);
                 // Restore the original block type
                 this.world.setBlock(
                     this.hoveredBlock.position.x,
@@ -92,11 +105,9 @@ export class Game {
         // If there's a new block being targeted, highlight it
         if (raycastResult && raycastResult.blockType !== null) {
             const { position, blockType } = raycastResult;
-            console.log('Block targeted at position:', position, 'Type:', BlockType[blockType as number]);
             
             // Only if it's not the same block we're already highlighting
             if (!this.hoveredBlock || !this.hoveredBlock.position.equals(position)) {
-                console.log('New block being highlighted');
                 // Save the original block type
                 const originalType = this.world.getBlock(position.x, position.y, position.z) || BlockType.AIR;
                 
@@ -110,7 +121,6 @@ export class Game {
                 this.updateHighlightBox(position);
             }
         } else if (raycastResult === null) {
-            console.log('No block targeted (raycast returned null)');
             // No block is being targeted, hide the highlight box
             this.updateHighlightBox(null);
         }
@@ -141,33 +151,32 @@ export class Game {
     private gameLoop(time: number): void {
         this.debugManager.updateStats();
         if (!this.isRunning) return;
-        
-        // Calculate delta time in seconds
+    
         const deltaTime = Math.min((time - this.lastTime) / 1000, 0.1);
         this.lastTime = time;
-        
+    
         try {
-            // Update game state
-            this.update(deltaTime);
-            
-            // Update player (handles camera movement)
+            // IMPORTANT: update player *before* update() so raycasts are fresh for highlighting and interactions
             this.player.update(deltaTime);
-            
+    
+            // Now update world / highlighting / chunk-loading etc
+            this.update(deltaTime);
+    
             // Render the scene
             this.renderer.render();
-            
-            // Update crosshair (debe ir después de renderizar la escena)
+    
+            // Update crosshair after render if needed
             if (this.crosshairManager) {
                 this.crosshairManager.update();
             }
-            
-            // Continue the game loop
+    
             this.animationFrameId = requestAnimationFrame(this.gameLoop);
         } catch (error) {
             console.error('Error in game loop:', error);
             this.stop();
         }
     }
+    
     
     /**
      * Stops the game loop and cleans up resources
@@ -239,29 +248,26 @@ export class Game {
      * Disposes of resources used by the game
      */
     public dispose(): void {
-        // Clean up resources
-        if (this.animationFrameId !== null) {
-            cancelAnimationFrame(this.animationFrameId);
-            this.animationFrameId = null;
+        this.stop();
+        
+        // Clean up block interaction
+        if (this.blockInteraction) {
+            this.blockInteraction.dispose();
+            this.blockInteraction = null;
         }
-
-        // Clean up block outline helper
-        if (this.blockOutlineHelper) {
-            this.blockOutlineHelper.dispose();
-            this.blockOutlineHelper = null;
-        }
-
-        // Clean up crosshair manager
-        if (this.crosshairManager) {
-            this.crosshairManager.dispose();
-            this.crosshairManager = null;
-        }
-
-        // Clean up other resources
-        this.renderer.dispose();
+        
+        // Clean up the world
         this.world.dispose();
+        
+        // Clean up the renderer
+        this.renderer.dispose();
+        
+        // Clean up the player
         this.player.dispose();
-
-        console.log('Game resources disposed');
+        
+        // Clean up debug manager
+        this.debugManager.dispose();
+        
+        console.log('Game disposed');
     }
 }

@@ -44,7 +44,7 @@ window.addEventListener('DOMContentLoaded', () => {
         const debugManager = new DebugManager(world);
         world.setScene(renderer.getScene(), debugManager);
         const game = new Game(renderer, world, player, debugManager);
-
+        
         debugManager.initKeyboardControls();
         
         // Start the game

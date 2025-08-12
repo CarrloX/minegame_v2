@@ -87,13 +87,7 @@ class WorkerManager {
                     const normals = new Float32Array(meshData.normals);
                     const uvs = new Float32Array(meshData.uvs);
                     const indices = new Uint32Array(meshData.indices);
-                    
-                    console.log('[WorkerManager] Received mesh data with:');
-                    console.log(`[WorkerManager] - Positions: ${positions.length / 3} vertices`);
-                    console.log(`[WorkerManager] - Normals: ${normals.length / 3} normals`);
-                    console.log(`[WorkerManager] - UVs: ${uvs.length / 2} UV coordinates`);
-                    console.log(`[WorkerManager] - Indices: ${indices.length} indices`);
-                    
+
                     // Include groups data if available
                     const result: MeshData = {
                         positions,
@@ -167,10 +161,6 @@ class WorkerManager {
                 resolve(null);
                 return;
             }
-            
-            // Log the data being sent to the worker
-            console.log(`[WorkerManager] Sending chunk [${chunkX},${chunkY},${chunkZ}] to worker`);
-            console.log(`[WorkerManager] Blocks buffer length: ${blocks.length}, first 10 values:`, Array.from(blocks.slice(0, 10)));
 
             const id = `task_${this.nextId++}`;
             
@@ -179,17 +169,12 @@ class WorkerManager {
             
             this.callbacks.set(id, (meshData, error) => {
                 if (error) {
-                    console.error(`[WorkerManager] Error for chunk [${chunkCoords.x},${chunkCoords.y},${chunkCoords.z}]:`, error);
                     resolve(null);
                 } else {
-                    console.log(`[WorkerManager] Successfully processed chunk [${chunkCoords.x},${chunkCoords.y},${chunkCoords.z}]`);
                     resolve(meshData);
                 }
             });
 
-            // Log the data being sent to the worker
-            console.log(`[WorkerManager] Posting message to worker for chunk [${chunkX},${chunkY},${chunkZ}]`);
-            
             try {
                 // Transfer the blocks array to avoid copying
                 this.worker.postMessage(
@@ -204,9 +189,7 @@ class WorkerManager {
                     [blocks.buffer] // Transfer ownership of the buffer
                 );
                 
-                console.log(`[WorkerManager] Message posted successfully to worker for chunk [${chunkX},${chunkY},${chunkZ}]`);
             } catch (error) {
-                console.error(`[WorkerManager] Error posting message to worker for chunk [${chunkX},${chunkY},${chunkZ}]:`, error);
                 resolve(null);
             }
         });

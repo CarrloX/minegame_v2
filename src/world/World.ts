@@ -340,7 +340,6 @@ export class World {
             }
             
             try {
-                console.log(`Generating ${mode} mesh for chunk [${chunk.x},${chunk.y},${chunk.z}]`);
                 
                 // Get the mesh (this will handle the transition if needed)
                 const mesh = chunk.getMesh(mode, this);
@@ -551,7 +550,6 @@ export class World {
                 } else if (chunk && chunk.isDirty) {
                     // Si el chunk está marcado como sucio, encolar una actualización
                     this.chunkQueue.addTask(chunkX, 0, chunkZ, mode, priority);
-                    console.log(`Queued update for dirty chunk [${chunkX},0,${chunkZ}]`);
                 }
             }
         }
@@ -564,14 +562,13 @@ export class World {
         }
     }
     
-    private updateDirtyChunks(): void {
+    public updateDirtyChunks(): void {
         for (const chunk of this.chunks.values()) {
             if (chunk.isDirty) {
                 const chunkKey = this.getChunkKey(chunk.x, chunk.y, chunk.z);
                 const mesh = this.chunkMeshes.get(chunkKey);
                 const mode = mesh?.userData.mode || 'detailed';
-                
-                console.log(`Updating dirty chunk [${chunk.x},${chunk.y},${chunk.z}] in ${mode} mode`);
+
                 this.addChunkToScene(chunk, mode);
                 chunk.isDirty = false;
             }

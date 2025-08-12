@@ -430,23 +430,14 @@ export class Chunk {
             
             // Use the worker to generate the mesh asynchronously
             const workerManager = WorkerManager.getInstance();
-            console.log(`[Chunk ${this.x},${this.y},${this.z}] Starting async mesh generation...`);
-            
-            // Log the number of non-air blocks being sent to the worker
-            const nonAirBlocks = blocks.filter(b => b !== BlockType.AIR).length;
-            console.log(`[Chunk ${this.x},${this.y},${this.z}] Sending ${nonAirBlocks} non-air blocks to worker`);
             
             workerManager.generateMesh(blocks, this.x, this.y, this.z)
                 .then((meshData: MeshData | null) => {
-                    console.log(`[Chunk ${this.x},${this.y},${this.z}] Worker completed mesh generation`);
                     if (!meshData) {
                         console.error(`[Chunk ${this.x},${this.y},${this.z}] Failed to generate mesh in worker - no data`);
                         if (this.mesh) this.mesh.visible = false;
                         return;
                     }
-                    
-                    console.log(`[Chunk ${this.x},${this.y},${this.z}] Mesh data received:`, 
-                        `${meshData.positions.length / 3} vertices, ${meshData.indices.length} indices`);
                     
                     // Create or update the geometry with the worker's data
                     if (this.mesh) {
@@ -472,12 +463,6 @@ export class Chunk {
                             this.mesh.geometry = geometry;
                             this.mesh.visible = true;
                             
-                            // Log mesh details
-                            const pos = geometry.getAttribute('position');
-                            const idx = geometry.getIndex();
-                            console.log(`[Chunk ${this.x},${this.y},${this.z}] Mesh updated successfully with ${pos.count} vertices and ${idx ? idx.count : 0} indices`);
-                            console.log(`[Chunk ${this.x},${this.y},${this.z}] Mesh position:`, this.mesh.position);
-                            console.log(`[Chunk ${this.x},${this.y},${this.z}] Mesh visible:`, this.mesh.visible);
                         } catch (error) {
                             console.error(`[Chunk ${this.x},${this.y},${this.z}] Error updating mesh:`, error);
                             if (this.mesh) this.mesh.visible = false;
