@@ -11,6 +11,10 @@ export class BlockOutlineHelper {
   private size = 0.5; // exact half-block
   private geometry: THREE.BufferGeometry | null = null;
   private faceRanges: { start: number; count: number }[] = [];
+  
+  // Variables temporales para evitar crear nuevos objetos en el bucle de actualización
+  private tmpPosition = new THREE.Vector3();
+  private tmpBlockPos = new THREE.Vector3();
 
   // Configurables
   private ignoredBlockTypes: Set<number> = new Set();            // si el bloque objetivo está en este set => no dibujar
@@ -208,8 +212,9 @@ export class BlockOutlineHelper {
       return;
     }
 
-    // Posicionar en el centro del bloque
-    this.highlightBox.position.set(blockX + 0.5, blockY + 0.5, blockZ + 0.5);
+    // Posicionar en el centro del bloque usando el vector temporal
+    this.tmpPosition.set(blockX + 0.5, blockY + 0.5, blockZ + 0.5);
+    this.highlightBox.position.copy(this.tmpPosition);
 
     // Usar el predicado de visibilidad para determinar si mostrar el contorno
     const shouldShowOutline = (nx: number, ny: number, nz: number): boolean => {
@@ -254,7 +259,9 @@ export class BlockOutlineHelper {
     const EPS = 0.001; // Pequeño offset para evitar z-fighting
     this.highlightBox.scale.set(1 + EPS, 1 + EPS, 1 + EPS);
     this.highlightBox.visible = anyVisible;
-    this.onHighlightChange?.(new THREE.Vector3(blockX, blockY, blockZ));
+    // Usar vector temporal para la notificación
+    this.tmpBlockPos.set(blockX, blockY, blockZ);
+    this.onHighlightChange?.(this.tmpBlockPos);
   }
 
   // -------------------
