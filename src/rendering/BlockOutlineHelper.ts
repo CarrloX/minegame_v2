@@ -23,10 +23,11 @@ export class BlockOutlineHelper {
     this.edgeMaterial = new THREE.LineBasicMaterial({
       color,
       transparent: true,
-      opacity: 0.95,
-      depthTest: false,
-      depthWrite: false,
-      toneMapped: false
+      opacity: 1.0, // Aumentar opacidad
+      depthTest: true,  // Habilitar depth test
+      depthWrite: true, // Habilitar escritura de profundidad
+      toneMapped: false,
+      linewidth: 2     // Asegurar que las líneas sean visibles
     });
 
     this.initializeHighlightBox();
@@ -69,8 +70,8 @@ export class BlockOutlineHelper {
   private initializeHighlightBox(): void {
     this.highlightBox = new THREE.Group();
     this.highlightBox.visible = false;
-    this.highlightBox.renderOrder = 9999; // dibujar encima
-    this.highlightBox.visible = false;
+    this.highlightBox.renderOrder = 1; // Valor bajo para que se dibuje antes
+    this.highlightBox.matrixAutoUpdate = true; // Permitir actualización automática
 
     const s = this.size;
     const corners = [
@@ -176,7 +177,7 @@ export class BlockOutlineHelper {
       this.faceGroups[f].visible = visible;
       anyVisible = anyVisible || visible;
     }
-    const EPS = 0.002;
+    const EPS = 0.001; // Reducir el offset para que no sea tan notorio
     this.highlightBox.scale.set(1 + EPS, 1 + EPS, 1 + EPS);
     this.highlightBox.visible = anyVisible;
     this.onHighlightChange?.(new THREE.Vector3(blockX, blockY, blockZ));
