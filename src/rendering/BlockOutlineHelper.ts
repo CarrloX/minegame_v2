@@ -2,34 +2,51 @@ import * as THREE from 'three';
 import { World } from '../world/World';
 import { BlockType } from '../world/BlockType';
 
+// Shared geometry for all FatLine instances (unit cube)
+const FAT_LINE_GEOMETRY = new THREE.BoxGeometry(1, 1, 1);
+
 // Clase auxiliar para crear líneas con ancho consistente usando mallas
 export class FatLine {
   public mesh: THREE.Mesh;
   private width: number;
+  private static geometry = FAT_LINE_GEOMETRY;
+  private static tmpDir = new THREE.Vector3();
+  private static tmpCenter = new THREE.Vector3();
+  private static tmpQuat = new THREE.Quaternion();
+  private static xAxis = new THREE.Vector3(1, 0, 0);
 
   constructor(start: THREE.Vector3, end: THREE.Vector3, width: number, material: THREE.Material) {
     this.width = width;
-    const geometry = new THREE.BoxGeometry(1, 1, 1); // unit box, reused
-    this.mesh = new THREE.Mesh(geometry, material);
+    // Reuse the shared geometry
+    this.mesh = new THREE.Mesh(FatLine.geometry, material);
     this.update(start, end);
   }
 
   public update(start: THREE.Vector3, end: THREE.Vector3): void {
-    const dir = new THREE.Vector3().subVectors(end, start);
-    const len = dir.length();
+    const { tmpDir, tmpCenter, tmpQuat, xAxis } = FatLine;
+    
+    // Calculate direction and length
+    tmpDir.subVectors(end, start);
+    const len = tmpDir.length();
+    
     if (len < 1e-6) {
       this.mesh.visible = false;
       return;
     }
+    
+    // Calculate center point
+    tmpCenter.addVectors(start, end).multiplyScalar(0.5);
+    
+    // Update mesh properties
     this.mesh.visible = true;
-    const center = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
-    this.mesh.position.copy(center);
-
-    // Align +X to dir
-    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(1,0,0), dir.clone().normalize());
-    this.mesh.quaternion.copy(q);
-
-    // scale: geometry is unit-size -> scale x to length, y,z to width
+    this.mesh.position.copy(tmpCenter);
+    
+    // Calculate rotation
+    const dirNormalized = tmpDir.normalize();
+    tmpQuat.setFromUnitVectors(xAxis, dirNormalized);
+    this.mesh.quaternion.copy(tmpQuat);
+    
+    // Update scale (x = length, y/z = width)
     this.mesh.scale.set(len, this.width, this.width);
   }
 }
