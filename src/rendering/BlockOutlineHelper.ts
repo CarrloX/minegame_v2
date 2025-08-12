@@ -15,12 +15,29 @@ export class BlockOutlineHelper {
   // Configurables
   private ignoredBlockTypes: Set<number> = new Set();            // si el bloque objetivo está en este set => no dibujar
   private transparentNeighborTypes: Set<number> = new Set();     // si el vecino está en este set => tratar como AIR al decidir visibilidad
+  private visibilityPredicate: (
+    targetType: number | undefined,
+    neighborType: number | undefined,
+    nx: number,
+    ny: number,
+    nz: number
+  ) => boolean;
 
   public onHighlightChange?: (pos: THREE.Vector3 | null) => void;
 
   constructor(scene: THREE.Scene, world: World, color = 0x000000) {
     this.scene = scene;
     this.world = world;
+    
+    // Predicado por defecto que usa la lógica actual
+    this.visibilityPredicate = (_, neighborType) => {
+      // undefined o AIR se consideran vacíos
+      if (neighborType === undefined || neighborType === BlockType.AIR) return true;
+      // Si el vecino está en transparentNeighborTypes, también consideramos vacío
+      if (this.transparentNeighborTypes.has(neighborType)) return true;
+      // en otro caso, es sólido
+      return false;
+    };
     this.edgeMaterial = new THREE.LineBasicMaterial({
       color,
       transparent: true,
@@ -51,16 +68,53 @@ export class BlockOutlineHelper {
     this.ignoredBlockTypes = new Set(types);
   }
 
-  /** Tratar el tipo de vecino como transparente (equivalente a AIR) para decidir visibilidad de caras */
+  /** 
+   * Establece un predicado personalizado para decidir la visibilidad de los contornos.
+   * @param predicate Función que recibe (targetType, neighborType, nx, ny, nz) y devuelve true si el contorno debe mostrarse
+   */
+  public setVisibilityPredicate(
+    predicate: (
+      targetType: number | undefined,
+      neighborType: number | undefined,
+      nx: number,
+      ny: number,
+      nz: number
+    ) => boolean
+  ): void {
+    this.visibilityPredicate = predicate;
+  }
+
+  /** 
+   * Restablece el predicado de visibilidad al comportamiento por defecto.
+   * El comportamiento por defecto considera transparentes a AIR y a los tipos en transparentNeighborTypes.
+   */
+  public resetVisibilityPredicate(): void {
+    this.visibilityPredicate = (_, neighborType) => {
+      if (neighborType === undefined || neighborType === BlockType.AIR) return true;
+      if (this.transparentNeighborTypes.has(neighborType)) return true;
+      return false;
+    };
+  }
+
+  /** 
+   * @deprecated Usa setVisibilityPredicate en su lugar para mayor flexibilidad
+   * Tratar el tipo de vecino como transparente (equivalente a AIR) para decidir visibilidad de caras 
+   */
   public addTransparentNeighborType(type: BlockType): void {
     this.transparentNeighborTypes.add(type);
   }
+  
+  /** @deprecated Usa setVisibilityPredicate en su lugar para mayor flexibilidad */
   public removeTransparentNeighborType(type: BlockType): void {
     this.transparentNeighborTypes.delete(type);
   }
+  
+  /** @deprecated Usa setVisibilityPredicate en su lugar para mayor flexibilidad */
   public clearTransparentNeighborTypes(): void {
     this.transparentNeighborTypes.clear();
   }
+  
+  /** @deprecated Usa setVisibilityPredicate en su lugar para mayor flexibilidad */
   public setTransparentNeighborTypes(types: BlockType[]): void {
     this.transparentNeighborTypes = new Set(types);
   }
@@ -157,12 +211,10 @@ export class BlockOutlineHelper {
     // Posicionar en el centro del bloque
     this.highlightBox.position.set(blockX + 0.5, blockY + 0.5, blockZ + 0.5);
 
-    // Helper para decidir si un vecino se considera "vacío" a efectos del outline
-    const neighborIsEmptyForOutline = (nx: number, ny: number, nz: number): boolean => {
-      const neighbor = this.world.getBlock(nx, ny, nz);
-      if (neighbor === undefined || neighbor === BlockType.AIR) return true;
-      if (this.transparentNeighborTypes.has(neighbor)) return true;
-      return false;
+    // Usar el predicado de visibilidad para determinar si mostrar el contorno
+    const shouldShowOutline = (nx: number, ny: number, nz: number): boolean => {
+      const neighborType = this.world.getBlock(nx, ny, nz);
+      return this.visibilityPredicate(targetType, neighborType, nx, ny, nz);
     };
 
     // Orden de checks: bottom, top, left, right, front, back
@@ -185,7 +237,7 @@ export class BlockOutlineHelper {
       const ny = blockY + dy;
       const nz = blockZ + dz;
       
-      if (neighborIsEmptyForOutline(nx, ny, nz)) {
+      if (shouldShowOutline(nx, ny, nz)) {
         drawRanges.push(this.faceRanges[f]);
         anyVisible = true;
       }
