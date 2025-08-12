@@ -31,17 +31,20 @@ Un motor de juego 3D tipo Minecraft desarrollado con Three.js y TypeScript, opti
 ## Cómo Ejecutar Localmente
 
 1. Clona el repositorio:
+
    ```bash
    git clone [URL_DEL_REPOSITORIO]
    cd minegame_v2
    ```
 
 2. Instala las dependencias:
+
    ```bash
    npm install
    ```
 
 3. Inicia el servidor de desarrollo:
+
    ```bash
    npm run dev
    ```
