@@ -6,49 +6,31 @@ import { BlockType } from '../world/BlockType';
 export class FatLine {
   public mesh: THREE.Mesh;
   private width: number;
-  private start: THREE.Vector3;
-  private end: THREE.Vector3;
 
   constructor(start: THREE.Vector3, end: THREE.Vector3, width: number, material: THREE.Material) {
     this.width = width;
-    this.start = start.clone();
-    this.end = end.clone();
-    
-    const direction = new THREE.Vector3().subVectors(end, start);
-    const length = direction.length();
-    const center = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
-    
-    const geometry = new THREE.BoxGeometry(length, width, width);
+    const geometry = new THREE.BoxGeometry(1, 1, 1); // unit box, reused
     this.mesh = new THREE.Mesh(geometry, material);
-    
-    // Orientar y posicionar la malla
-    this.mesh.position.copy(center);
-    this.mesh.lookAt(end);
-    // Rotar 90 grados en el eje Y para alinear con la dirección
-    this.mesh.rotateY(Math.PI / 2);
+    this.update(start, end);
   }
 
   public update(start: THREE.Vector3, end: THREE.Vector3): void {
-    this.start.copy(start);
-    this.end.copy(end);
-    
-    const direction = new THREE.Vector3().subVectors(end, start);
-    const length = direction.length();
+    const dir = new THREE.Vector3().subVectors(end, start);
+    const len = dir.length();
+    if (len < 1e-6) {
+      this.mesh.visible = false;
+      return;
+    }
+    this.mesh.visible = true;
     const center = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
-    
-    // Actualizar geometría
-    const geometry = new THREE.BoxGeometry(length, this.width, this.width);
-    this.mesh.geometry.dispose();
-    this.mesh.geometry = geometry;
-    
-    // Actualizar posición y rotación
     this.mesh.position.copy(center);
-    this.mesh.lookAt(end);
-    this.mesh.rotateY(Math.PI / 2);
-  }
 
-  public dispose(): void {
-    this.mesh.geometry.dispose();
+    // Align +X to dir
+    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(1,0,0), dir.clone().normalize());
+    this.mesh.quaternion.copy(q);
+
+    // scale: geometry is unit-size -> scale x to length, y,z to width
+    this.mesh.scale.set(len, this.width, this.width);
   }
 }
 
@@ -61,7 +43,7 @@ export class BlockOutlineHelper {
   private highlightBox: THREE.Group | null = null;
   private edgeMaterial: THREE.MeshBasicMaterial;
   private fatLines: FatLine[] = [];
-  private faceRanges: { start: number; count: number }[] = [];
+  private faceGroups: THREE.Group[] = [];
   
   // Variables temporales para evitar crear nuevos objetos en el bucle de actualización
   private tmpPosition = new THREE.Vector3();
@@ -94,7 +76,7 @@ export class BlockOutlineHelper {
     this.edgeMaterial = new THREE.MeshBasicMaterial({
       color,
       transparent: true,
-      opacity: 1.0,
+      opacity: 1,
       depthTest: true,
       depthWrite: true,
       side: THREE.DoubleSide
@@ -215,10 +197,10 @@ export class BlockOutlineHelper {
       [0, 4], [1, 5], [2, 6], [3, 7]
     ];
 
-    // Limpiar líneas existentes
+    // Limpiar líneas y grupos existentes
     this.fatLines.forEach(line => line.dispose());
     this.fatLines = [];
-    this.faceRanges = [];
+    this.faceGroups = [];
     
     // Limpiar grupos existentes
     while (this.highlightBox.children.length > 0) {
@@ -231,10 +213,7 @@ export class BlockOutlineHelper {
     // Crear 6 grupos (uno por cara)
     for (let i = 0; i < 6; i++) {
       const group = new THREE.Group();
-      this.faceRanges.push({
-        start: i * 4,
-        count: 4
-      });
+      this.faceGroups.push(group);
       this.highlightBox.add(group);
     }
 
@@ -244,9 +223,9 @@ export class BlockOutlineHelper {
       const start = corners[startIdx];
       const end = corners[endIdx];
       
-      // Determinar a qué grupo pertenece esta arista
-      const groupIdx = Math.floor(i / 4); // 4 aristas por cara
-      const group = this.highlightBox.children[groupIdx] as THREE.Group;
+      // Determinar a qué grupo pertenece esta arista (4 aristas por cara)
+      const groupIdx = Math.floor(i / 4);
+      const group = this.faceGroups[groupIdx];
       
       // Crear la línea gruesa
       const line = new FatLine(start, end, lineWidth, this.edgeMaterial);
@@ -308,30 +287,23 @@ export class BlockOutlineHelper {
       [0, 0,-1] // back   (z-)
     ];
 
-    // Crear un array con los rangos de dibujo visibles
-    const drawRanges: { start: number; count: number }[] = [];
     let anyVisible = false;
 
-    for (let f = 0; f < faceChecks.length; f++) {
-      const [dx, dy, dz] = faceChecks[f];
+    // Actualizar visibilidad de los grupos de caras
+    for (let i = 0; i < faceChecks.length; i++) {
+      const [dx, dy, dz] = faceChecks[i];
       const nx = blockX + dx;
       const ny = blockY + dy;
       const nz = blockZ + dz;
       
-      if (shouldShowOutline(nx, ny, nz)) {
-        drawRanges.push(this.faceRanges[f]);
+      const isVisible = shouldShowOutline(nx, ny, nz);
+      if (isVisible) {
         anyVisible = true;
       }
-    }
-
-    // Actualizar visibilidad de los grupos de caras
-    if (this.highlightBox) {
-      for (let i = 0; i < this.highlightBox.children.length; i++) {
-        const group = this.highlightBox.children[i] as THREE.Group;
-        const isVisible = drawRanges.some(range => 
-          i * 4 >= range.start && i * 4 < range.start + range.count
-        );
-        group.visible = isVisible;
+      
+      // Actualizar visibilidad del grupo de esta cara
+      if (i < this.faceGroups.length) {
+        this.faceGroups[i].visible = isVisible;
       }
     }
 
@@ -366,21 +338,18 @@ export class BlockOutlineHelper {
   // Limpieza
   // -------------------
   public dispose(): void {
-    if (!this.highlightBox) return;
-    
     // Eliminar todas las líneas gruesas
-    for (const line of this.fatLines) {
-      line.dispose();
-    }
+    this.fatLines.forEach(line => line.mesh.geometry.dispose());
     this.fatLines = [];
     
-    this.scene.remove(this.highlightBox);
-
-    if (this.edgeMaterial) {
-      this.edgeMaterial.dispose();
+    // Limpiar grupos
+    this.faceGroups = [];
+    
+    // Eliminar el grupo principal
+    if (this.highlightBox && this.highlightBox.parent) {
+      this.highlightBox.parent.remove(this.highlightBox);
     }
-
-    (this.highlightBox as any) = null;
-    this.faceRanges = [];
+    
+    // No eliminamos el material aquí ya que podría ser compartido externamente
   }
 }
