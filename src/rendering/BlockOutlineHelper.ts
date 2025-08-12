@@ -2,73 +2,41 @@ import * as THREE from 'three';
 import { World } from '../world/World';
 import { BlockType } from '../world/BlockType';
 
-// Shared geometry for all FatLine instances (unit cube)
-const FAT_LINE_GEOMETRY = new THREE.BoxGeometry(1, 1, 1);
+// Shared geometry for all edge instances (unit box along X axis)
+const EDGE_GEOMETRY = (() => {
+  const geometry = new THREE.BoxGeometry(1, 1, 1);
+  geometry.translate(0.5, 0, 0); // Center the box at origin
+  return geometry;
+})();
 
-// Clase auxiliar para crear líneas con ancho consistente usando mallas
-export class FatLine {
-  public mesh: THREE.Mesh;
-  private width: number;
-  private static geometry = FAT_LINE_GEOMETRY;
-  private static tmpDir = new THREE.Vector3();
-  private static tmpCenter = new THREE.Vector3();
-  private static tmpQuat = new THREE.Quaternion();
-  private static xAxis = new THREE.Vector3(1, 0, 0);
-
-  constructor(start: THREE.Vector3, end: THREE.Vector3, width: number, material: THREE.Material) {
-    this.width = width;
-    // Reuse the shared geometry
-    this.mesh = new THREE.Mesh(FatLine.geometry, material);
-    this.update(start, end);
-  }
-
-  public update(start: THREE.Vector3, end: THREE.Vector3): void {
-    const { tmpDir, tmpCenter, tmpQuat, xAxis } = FatLine;
-    
-    // Calculate direction and length
-    tmpDir.subVectors(end, start);
-    const len = tmpDir.length();
-    
-    if (len < 1e-6) {
-      this.mesh.visible = false;
-      return;
-    }
-    
-    // Calculate center point
-    tmpCenter.addVectors(start, end).multiplyScalar(0.5);
-    
-    // Update mesh properties
-    this.mesh.visible = true;
-    this.mesh.position.copy(tmpCenter);
-    
-    // Calculate rotation
-    const dirNormalized = tmpDir.normalize();
-    tmpQuat.setFromUnitVectors(xAxis, dirNormalized);
-    this.mesh.quaternion.copy(tmpQuat);
-    
-    // Update scale (x = length, y/z = width)
-    this.mesh.scale.set(len, this.width, this.width);
-  }
-}
+// Maximum number of edges in a cube
+const MAX_EDGES = 12;
 
 export class BlockOutlineHelper {
   private scene: THREE.Scene;
   private world: World;
   private size = 0.5; // exact half-block
   
-  // Elementos de renderizado
+  // Rendering elements
   private highlightBox: THREE.Group | null = null;
   private edgeMaterial: THREE.MeshBasicMaterial;
-  private fatLines: FatLine[] = [];
-  private faceGroups: THREE.Group[] = [];
+  private instanceMesh: THREE.InstancedMesh;
+  private edgeMatrices: THREE.Matrix4[] = [];
+  private visibleCount: number = 0;
   
-  // Variables temporales para evitar crear nuevos objetos en el bucle de actualización
+  // Reusable objects to avoid allocations
+  private tmpMatrix = new THREE.Matrix4();
   private tmpPosition = new THREE.Vector3();
+  private tmpQuaternion = new THREE.Quaternion();
+  private tmpScale = new THREE.Vector3(1, 1, 1);
+  private tmpDir = new THREE.Vector3();
+  private tmpCenter = new THREE.Vector3();
+  private xAxis = new THREE.Vector3(1, 0, 0);
   private tmpBlockPos = new THREE.Vector3();
 
-  // Configurables
-  private ignoredBlockTypes: Set<number> = new Set();            // si el bloque objetivo está en este set => no dibujar
-  private transparentNeighborTypes: Set<number> = new Set();     // si el vecino está en este set => tratar como AIR al decidir visibilidad
+  // Configuration
+  private ignoredBlockTypes = new Set<number>();            // si el bloque objetivo está en este set => no dibujar
+  private transparentNeighborTypes = new Set<number>();     // si el vecino está en este set => tratar como AIR al decidir visibilidad
   private visibilityPredicate: (
     targetType: number | undefined,
     neighborType: number | undefined,
@@ -83,29 +51,43 @@ export class BlockOutlineHelper {
     this.scene = scene;
     this.world = world;
     
-    // Inicializar el grupo principal
+    // Initialize the main group
     this.highlightBox = new THREE.Group();
     this.highlightBox.visible = false;
     this.highlightBox.renderOrder = 1;
     this.highlightBox.matrixAutoUpdate = true;
     
-    // Crear el material para las líneas gruesas
+    // Create material for the edges
     this.edgeMaterial = new THREE.MeshBasicMaterial({
-      color,
+      color: color,
       transparent: true,
-      opacity: 1,
+      opacity: 0.8,
       depthTest: true,
-      depthWrite: true,
+      depthWrite: false,
       side: THREE.DoubleSide
     });
     
-    // Predicado por defecto que usa la lógica actual
+    // Create instanced mesh for all edges
+    this.instanceMesh = new THREE.InstancedMesh(
+      EDGE_GEOMETRY,
+      this.edgeMaterial,
+      MAX_EDGES
+    );
+    this.instanceMesh.frustumCulled = false;
+    this.instanceMesh.renderOrder = 1000; // Ensure it renders on top
+    this.highlightBox.add(this.instanceMesh);
+    
+    // Add highlight box to the scene and ensure it's visible
+    this.scene.add(this.highlightBox);
+    this.highlightBox.visible = true;
+    
+    // Initialize edge matrices
+    this.edgeMatrices = Array(MAX_EDGES).fill(null).map(() => new THREE.Matrix4());
+    
+    // Default visibility predicate
     this.visibilityPredicate = (_, neighborType) => {
-      // undefined o AIR se consideran vacíos
       if (neighborType === undefined || neighborType === BlockType.AIR) return true;
-      // Si el vecino está en transparentNeighborTypes, también consideramos vacío
       if (this.transparentNeighborTypes.has(neighborType)) return true;
-      // en otro caso, es sólido
       return false;
     };
     
@@ -184,15 +166,11 @@ export class BlockOutlineHelper {
   // Inicialización
   // -------------------
   private initializeHighlightBox(): void {
-    if (!this.highlightBox) {
-      this.highlightBox = new THREE.Group();
-      this.highlightBox.visible = false;
-      this.highlightBox.renderOrder = 1;
-      this.highlightBox.matrixAutoUpdate = true;
-    }
-
-    const s = this.size;
-    // Definir los vértices del cubo
+    if (!this.highlightBox) return;
+    
+    // Define cube corners in local space (centered at origin)
+    const s = 0.5; // Fixed size to ensure proper cube dimensions
+    this.size = s; // Update the size property
     const corners = [
       new THREE.Vector3(-s, -s, -s), // 0
       new THREE.Vector3(s, -s, -s),  // 1
@@ -203,56 +181,48 @@ export class BlockOutlineHelper {
       new THREE.Vector3(s, s, s),    // 6
       new THREE.Vector3(-s, s, s)    // 7
     ];
-
-    // Definir las aristas del cubo (pares de índices de vértices)
+    
+    // Define edge connections (pairs of vertex indices)
     const edges = [
-      // bottom (y-)
+      // Bottom face (y-)
       [0, 1], [1, 2], [2, 3], [3, 0],
-      // top (y+)
+      // Top face (y+)
       [4, 5], [5, 6], [6, 7], [7, 4],
-      // sides
+      // Vertical edges
       [0, 4], [1, 5], [2, 6], [3, 7]
     ];
 
-    // Limpiar líneas y grupos existentes
-    this.fatLines.forEach(line => line.dispose());
-    this.fatLines = [];
-    this.faceGroups = [];
-    
-    // Limpiar grupos existentes
-    while (this.highlightBox.children.length > 0) {
-      const child = this.highlightBox.children[0];
-      this.highlightBox.remove(child);
-    }
+    // Use the edges defined above
 
-    const lineWidth = 0.01; // Ancho de las líneas (reducido de 0.03 a 0.01)
-    
-    // Crear 6 grupos (uno por cara)
-    for (let i = 0; i < 6; i++) {
-      const group = new THREE.Group();
-      this.faceGroups.push(group);
-      this.highlightBox.add(group);
-    }
-
-    // Crear las líneas gruesas
-    for (let i = 0; i < edges.length; i++) {
+    // Pre-calculate edge matrices
+    const lineWidth = 0.01;
+    for (let i = 0; i < edges.length && i < this.edgeMatrices.length; i++) {
       const [startIdx, endIdx] = edges[i];
       const start = corners[startIdx];
       const end = corners[endIdx];
       
-      // Determinar a qué grupo pertenece esta arista (4 aristas por cara)
-      const groupIdx = Math.floor(i / 4);
-      const group = this.faceGroups[groupIdx];
+      // Calculate direction and length
+      this.tmpDir.subVectors(end, start);
+      const length = this.tmpDir.length();
       
-      // Crear la línea gruesa
-      const line = new FatLine(start, end, lineWidth, this.edgeMaterial);
-      this.fatLines.push(line);
-      group.add(line.mesh);
-    }
-
-    // Asegurarse de que el highlightBox esté en la escena
-    if (this.highlightBox.parent !== this.scene) {
-      this.scene.add(this.highlightBox);
+      if (length < 1e-6) continue;
+      
+      // Calculate center point
+      this.tmpCenter.addVectors(start, end).multiplyScalar(0.5);
+      
+      // Calculate rotation to align with edge
+      const dirNormalized = this.tmpDir.normalize();
+      this.tmpQuaternion.setFromUnitVectors(this.xAxis, dirNormalized);
+      
+      // Set scale (length, width, width)
+      this.tmpScale.set(length, lineWidth, lineWidth);
+      
+      // Create and store matrix
+      this.edgeMatrices[i].compose(
+        this.tmpCenter,
+        this.tmpQuaternion,
+        this.tmpScale
+      );
     }
   }
 
@@ -276,7 +246,7 @@ export class BlockOutlineHelper {
     const blockY = Math.floor(position.y);
     const blockZ = Math.floor(position.z);
 
-    // Si el bloque objetivo está en la lista de ignorados => ocultar
+    // Check if target block is in the ignored list
     const targetType = this.world.getBlock(blockX, blockY, blockZ);
     if (targetType !== undefined && this.ignoredBlockTypes.has(targetType)) {
       this.highlightBox.visible = false;
@@ -284,50 +254,33 @@ export class BlockOutlineHelper {
       return;
     }
 
-    // Posicionar en el centro del bloque usando el vector temporal
+    // Position the highlight box at the block center
     this.tmpPosition.set(blockX + 0.5, blockY + 0.5, blockZ + 0.5);
     this.highlightBox.position.copy(this.tmpPosition);
 
-    // Usar el predicado de visibilidad para determinar si mostrar el contorno
-    const shouldShowOutline = (nx: number, ny: number, nz: number): boolean => {
-      const neighborType = this.world.getBlock(nx, ny, nz);
-      return this.visibilityPredicate(targetType, neighborType, nx, ny, nz);
-    };
-
-    // Orden de checks: bottom, top, left, right, front, back
-    const faceChecks: [number, number, number][] = [
-      [0,-1,0], // bottom (y-)
-      [0, 1,0], // top    (y+)
-      [-1,0,0], // left   (x-)
-      [1, 0,0], // right  (x+)
-      [0, 0, 1],// front  (z+)
-      [0, 0,-1] // back   (z-)
-    ];
-
-    let anyVisible = false;
-
-    // Actualizar visibilidad de los grupos de caras
-    for (let i = 0; i < faceChecks.length; i++) {
-      const [dx, dy, dz] = faceChecks[i];
-      const nx = blockX + dx;
-      const ny = blockY + dy;
-      const nz = blockZ + dz;
-      
-      const isVisible = shouldShowOutline(nx, ny, nz);
-      if (isVisible) {
-        anyVisible = true;
-      }
-      
-      // Actualizar visibilidad del grupo de esta cara
-      if (i < this.faceGroups.length) {
-        this.faceGroups[i].visible = isVisible;
+    // For now, just show all edges for testing
+    this.visibleCount = 0;
+    for (let i = 0; i < Math.min(MAX_EDGES, this.edgeMatrices.length); i++) {
+      if (this.edgeMatrices[i]) {
+        this.instanceMesh.setMatrixAt(i, this.edgeMatrices[i]);
+        this.visibleCount++;
       }
     }
-
-    const EPS = 0.001; // Pequeño offset para evitar z-fighting
-    this.highlightBox.scale.set(1 + EPS, 1 + EPS, 1 + EPS);
-    this.highlightBox.visible = anyVisible;
-    // Usar vector temporal para la notificación
+    
+    // Update instance count and mark as needing update
+    this.instanceMesh.count = this.visibleCount;
+    if (this.visibleCount > 0) {
+      this.instanceMesh.instanceMatrix.needsUpdate = true;
+      this.highlightBox.visible = true;
+    } else {
+      this.highlightBox.visible = false;
+    }
+    
+    // Notify about highlight change
+    this.tmpBlockPos.set(blockX, blockY, blockZ);
+    this.onHighlightChange?.(this.tmpBlockPos);
+    
+    // Notify about highlight change
     this.tmpBlockPos.set(blockX, blockY, blockZ);
     this.onHighlightChange?.(this.tmpBlockPos);
   }
@@ -355,18 +308,17 @@ export class BlockOutlineHelper {
   // Limpieza
   // -------------------
   public dispose(): void {
-    // Eliminar todas las líneas gruesas
-    this.fatLines.forEach(line => line.mesh.geometry.dispose());
-    this.fatLines = [];
+    // Clean up instanced mesh
+    if (this.instanceMesh) {
+      this.highlightBox?.remove(this.instanceMesh);
+      this.instanceMesh.dispose();
+    }
     
-    // Limpiar grupos
-    this.faceGroups = [];
-    
-    // Eliminar el grupo principal
+    // Clean up the main group
     if (this.highlightBox && this.highlightBox.parent) {
       this.highlightBox.parent.remove(this.highlightBox);
     }
     
-    // No eliminamos el material aquí ya que podría ser compartido externamente
+    // Don't dispose the material as it might be shared
   }
 }
