@@ -164,9 +164,6 @@ class WorkerManager {
 
             const id = `task_${this.nextId++}`;
             
-            // Store chunk coordinates for logging in the callback
-            const chunkCoords = { x: chunkX, y: chunkY, z: chunkZ };
-            
             this.callbacks.set(id, (meshData, error) => {
                 if (error) {
                     resolve(null);

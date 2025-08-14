@@ -86,25 +86,20 @@ export class Game {
         const raycastResult = this.player.getLastRaycastResult();
         
         // If there was a previously highlighted block that's no longer being targeted, restore it
+        // Reemplaza el bloque de "restauración" por esto:
         if (this.hoveredBlock) {
+            const currentType = this.world.getBlock(this.hoveredBlock.position.x, this.hoveredBlock.position.y, this.hoveredBlock.position.z);
             if (!raycastResult || !this.hoveredBlock.position.equals(raycastResult.position)) {
-                // Restore the original block type
-                this.world.setBlock(
-                    this.hoveredBlock.position.x,
-                    this.hoveredBlock.position.y,
-                    this.hoveredBlock.position.z,
-                    this.hoveredBlock.originalType
-                );
-                this.hoveredBlock = null;
-                
-                // Hide the highlight box
-                this.updateHighlightBox(null);
+            // Si el bloque fue modificado por otra acción (minado / colocado), NO restauramos.
+            // Sólo limpiamos nuestro estado local y ocultamos el outline.
+            this.hoveredBlock = null;
+            this.updateHighlightBox(null);
             }
         }
         
         // If there's a new block being targeted, highlight it
         if (raycastResult && raycastResult.blockType !== null) {
-            const { position, blockType } = raycastResult;
+            const { position } = raycastResult;
             
             // Only if it's not the same block we're already highlighting
             if (!this.hoveredBlock || !this.hoveredBlock.position.equals(position)) {

@@ -422,11 +422,13 @@ export class Chunk {
                 this.mesh.visible = true;
             }
             
-            // Mark as not dirty immediately to prevent multiple updates
-            this.isDirty = false;
-            
             // Get the blocks as a Uint8Array for the worker
             const blocks = this.blocks.slice(); // Create a copy to avoid transfer issues
+            
+            // Store a reference to this chunk to ensure we're working with the latest state
+            const chunkX = this.x;
+            const chunkY = this.y;
+            const chunkZ = this.z;
             
             // Use the worker to generate the mesh asynchronously
             const workerManager = WorkerManager.getInstance();
@@ -464,8 +466,13 @@ export class Chunk {
                             this.mesh.visible = true;
                             
                         } catch (error) {
-                            console.error(`[Chunk ${this.x},${this.y},${this.z}] Error updating mesh:`, error);
+                            console.error(`[Chunk ${chunkX},${chunkY},${chunkZ}] Error updating mesh:`, error);
                             if (this.mesh) this.mesh.visible = false;
+                        } finally {
+                            // Only mark as not dirty after mesh generation is complete
+                            if (this.x === chunkX && this.y === chunkY && this.z === chunkZ) {
+                                this.isDirty = false;
+                            }
                         }
                     }
                 })
