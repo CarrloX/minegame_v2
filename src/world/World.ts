@@ -1,3 +1,4 @@
+// World.ts (corregido)
 import * as THREE from 'three';
 import { Chunk } from './Chunk';
 import { BlockType } from './BlockType';
@@ -39,7 +40,7 @@ export class World {
     // Material settings
     private readonly materialSettings = {
         map: null as THREE.Texture | null,
-        side: THREE.DoubleSide,  // Renderizar ambos lados de las caras
+        side: THREE.DoubleSide,  // Render both sides so greedy/detailed mismatches are less visible
         color: 0xFFFFFF,
         fog: false,
         toneMapped: false,
@@ -65,9 +66,6 @@ export class World {
         this.loadTextureAtlas();
     }
     
-    /**
-     * Loads the texture atlas
-     */
     /**
      * Loads the texture atlas and initializes shared materials
      */
@@ -95,12 +93,14 @@ export class World {
                     // Create debug material (wireframe)
                     this.debugMaterial = this.sharedMaterial.clone();
                     this.debugMaterial.wireframe = true;
-                    this.debugMaterial.wireframeLinewidth = 1;
+                    // wireframeLinewidth is not supported consistently; keep as informational
+                    // this.debugMaterial.wireframeLinewidth = 1;
                     
                     console.log('Shared materials initialized');
                     
-                    // Mark all chunks as dirty to regenerate with new material
+                    // Mark all chunks as dirty to regenerate with new material and force an update pass
                     this.markAllChunksDirty();
+                    this.updateDirtyChunks();
                 },
                 undefined,
                 (error) => {
@@ -242,11 +242,9 @@ export class World {
 
         // Check chunks from top to bottom
         for (const chunkY of sortedChunkYs) {
-            const startY = (chunkY === sortedChunkYs[0]) ? Chunk.HEIGHT - 1 : Chunk.HEIGHT - 1;
+            const startY = Chunk.HEIGHT - 1;
             const endY = 0;
-            const step = -1;
-            
-            for (let y = startY; y >= endY; y += step) {
+            for (let y = startY; y >= endY; y--) {
                 const worldY = chunkY * Chunk.HEIGHT + y;
                 if (this.getBlock(x, worldY, z) !== BlockType.AIR) {
                     return worldY + 1; // +1 because we want the block above
@@ -284,22 +282,43 @@ export class World {
         const localZ = z - (chunkZ * Chunk.SIZE);
         
         const chunk = this.getOrGenerateChunk(chunkX, chunkY, chunkZ);
+        const oldBlockType = chunk.getBlock(localX, localY, localZ);
+        
+        // If the block type hasn't changed, don't do anything
+        if (oldBlockType === blockType) {
+            return;
+        }
+        
+        // Update the block
         chunk.setBlock(localX, localY, localZ, blockType);
+        
+        // Force the chunk to regenerate its mesh
+        chunk.forceMeshRegeneration();
+        
+        // Mark the chunk as dirty
         this.markChunkDirty(chunkX, chunkY, chunkZ);
-
-        const adjacentChunks = this.getAdjacentChunks(chunkX, chunkY, chunkZ, localX, localY, localZ);
-        adjacentChunks.forEach(adjChunk => this.markChunkDirty(adjChunk.x, adjChunk.y, adjChunk.z));
-    }
-
-    private getAdjacentChunks(chunkX: number, chunkY: number, chunkZ: number, localX: number, localY: number, localZ: number): Chunk[] {
-        const adjacentChunks: Chunk[] = [];
-        if (localX === 0) adjacentChunks.push(this.getOrGenerateChunk(chunkX - 1, chunkY, chunkZ));
-        if (localX === Chunk.SIZE - 1) adjacentChunks.push(this.getOrGenerateChunk(chunkX + 1, chunkY, chunkZ));
-        if (localY === 0) adjacentChunks.push(this.getOrGenerateChunk(chunkX, chunkY - 1, chunkZ));
-        if (localY === Chunk.HEIGHT - 1) adjacentChunks.push(this.getOrGenerateChunk(chunkX, chunkY + 1, chunkZ));
-        if (localZ === 0) adjacentChunks.push(this.getOrGenerateChunk(chunkX, chunkY, chunkZ - 1));
-        if (localZ === Chunk.SIZE - 1) adjacentChunks.push(this.getOrGenerateChunk(chunkX, chunkY, chunkZ + 1));
-        return adjacentChunks;
+        
+        // Update adjacent chunks if the block is on a chunk border
+        const adjacentChunks: {x: number, y: number, z: number}[] = [];
+        
+        if (localX === 0) adjacentChunks.push({x: chunkX - 1, y: chunkY, z: chunkZ});
+        if (localX === Chunk.SIZE - 1) adjacentChunks.push({x: chunkX + 1, y: chunkY, z: chunkZ});
+        if (localY === 0) adjacentChunks.push({x: chunkX, y: chunkY - 1, z: chunkZ});
+        if (localY === Chunk.HEIGHT - 1) adjacentChunks.push({x: chunkX, y: chunkY + 1, z: chunkZ});
+        if (localZ === 0) adjacentChunks.push({x: chunkX, y: chunkY, z: chunkZ - 1});
+        if (localZ === Chunk.SIZE - 1) adjacentChunks.push({x: chunkX, y: chunkY, z: chunkZ + 1});
+        
+        // Mark all adjacent chunks as dirty and force their regeneration
+        adjacentChunks.forEach(adjChunk => {
+            const adjChunkObj = this.getChunk(adjChunk.x, adjChunk.y, adjChunk.z);
+            if (adjChunkObj) {
+                adjChunkObj.forceMeshRegeneration();
+                this.markChunkDirty(adjChunk.x, adjChunk.y, adjChunk.z);
+            }
+        });
+        
+        // Force immediate update of all dirty chunks (attempt immediate visual feedback)
+        this.updateDirtyChunks();
     }
     
     private getChunkKey(x: number, y: number, z: number): string {
@@ -315,86 +334,105 @@ export class World {
     }
     
     /**
-     * Adds a chunk's mesh to the scene with the specified level of detail
-     * @param chunk The chunk to add to the scene
-     * @param mode The level of detail to use for this chunk
+     * Adds a chunk's mesh to the scene with the specified level of detail.
+     * Returns true if the mesh in the scene was updated/replaced, false if nothing changed.
      */
-    private addChunkToScene(chunk: Chunk, mode: 'detailed' | 'greedy'): void {
-        if (!this.scene || !this.sharedMaterial) return;
+    private addChunkToScene(chunk: Chunk, mode: 'detailed' | 'greedy'): boolean {
+        if (!this.scene || !this.sharedMaterial) return false;
         const chunkKey = this.getChunkKey(chunk.x, chunk.y, chunk.z);
         
-        // Check if we need to update the LOD
+        // Check if we need to update the LOD or regenerate due to dirty flag
         const existingMesh = this.chunkMeshes.get(chunkKey);
-        const needsUpdate = !existingMesh || existingMesh.userData?.mode !== mode;
+        const needsUpdate = chunk.isDirty || !existingMesh || existingMesh.userData?.mode !== mode;
         
-        // Only update if necessary
-        if (needsUpdate) {
-            // If we already have a mesh, start a transition
-            if (existingMesh) {
-                chunk.startTransitionToLOD(mode);
-            }
+        if (!needsUpdate) {
+            // Nothing to do
+            return false;
+        }
+
+        // If we already have a mesh, start a transition
+        if (existingMesh) {
+            chunk.startTransitionToLOD(mode);
+        }
+        
+        // Remove old mesh from scene but keep it in chunk for transition handling
+        if (existingMesh) {
+            this.scene.remove(existingMesh);
+        }
+        
+        try {
+            // Get the mesh (this will handle the transition if needed) — pass world for neighbor queries
+            const mesh = chunk.getMesh(mode, this);
             
-            // Remove old mesh from scene but keep it in the chunk for transition
-            if (existingMesh) {
-                this.scene.remove(existingMesh);
-            }
-            
-            try {
+            if (mesh) {
+                // Store the LOD mode / chunk coords in the mesh for later reference
+                mesh.userData = mesh.userData || {};
+                mesh.userData.mode = mode;
+                mesh.userData.chunkX = chunk.x;
+                mesh.userData.chunkY = chunk.y;
+                mesh.userData.chunkZ = chunk.z;
                 
-                // Get the mesh (this will handle the transition if needed)
-                const mesh = chunk.getMesh(mode, this);
+                // Apply the shared material (clone when necessary for transitions)
+                const material = this.getMaterial();
+                if (!material) {
+                    console.warn(`Failed to get material for chunk ${chunkKey}`);
+                    return false;
+                }
+
+                const clonedMaterial = this.cloneMaterialForTransition(material);
+                mesh.material = clonedMaterial;
+
+                // Ensure geometry attributes are flagged for update
+                const geom = mesh.geometry as THREE.BufferGeometry;
+                if (geom) {
+                    // compute bounding box if needed
+                    if (!geom.boundingBox) geom.computeBoundingBox();
+
+                    if (geom.attributes.position) geom.attributes.position.needsUpdate = true;
+                    if (geom.attributes.normal) geom.attributes.normal.needsUpdate = true;
+                    if (geom.attributes.uv) geom.attributes.uv.needsUpdate = true;
+                    if (geom.index) geom.index.needsUpdate = true;
+                }
+
+                // Add to scene and store reference
+                this.chunkMeshes.set(chunkKey, mesh);
+                this.scene.add(mesh);
                 
-                if (mesh) {
-                    // Store the LOD mode in the mesh for later reference
-                    mesh.userData = mesh.userData || {};
-                    mesh.userData.mode = mode;
-                    mesh.userData.chunkX = chunk.x;
-                    mesh.userData.chunkY = chunk.y;
-                    mesh.userData.chunkZ = chunk.z;
+                // If we have a transition mesh, add it to the scene too
+                if ((chunk as any)['transitionMesh']) {
+                    const transitionMesh = (chunk as any)['transitionMesh'] as THREE.Mesh;
+                    const transitionMaterial = this.cloneMaterialForTransition(material);
+                    transitionMesh.material = transitionMaterial;
+                    this.scene.add(transitionMesh);
                     
-                    // Apply the shared material
-                    const material = this.getMaterial();
-                    if (material) {
-                        // For transitions, we need to clone the material to set individual opacity
-                        const clonedMaterial = this.cloneMaterialForTransition(material);
-                        mesh.material = clonedMaterial;
-                        
-                        // Add to scene and store reference
-                        this.chunkMeshes.set(chunkKey, mesh);
-                        this.scene.add(mesh);
-                        
-                        // If we have a transition mesh, add it to the scene too
-                        if (chunk['transitionMesh']) {
-                            const transitionMesh = chunk['transitionMesh'];
-                            const transitionMaterial = this.cloneMaterialForTransition(material);
-                            transitionMesh.material = transitionMaterial;
-                            this.scene.add(transitionMesh);
-                            
-                            // Set initial opacity for crossfade
-                            if ('opacity' in transitionMaterial) {
-                                transitionMaterial.opacity = 1.0;
-                                transitionMaterial.transparent = true;
-                            }
-                            
-                            // Set initial opacity for new mesh
-                            if ('opacity' in clonedMaterial) {
-                                (clonedMaterial as THREE.Material).opacity = 0.0;
-                                (clonedMaterial as THREE.Material).transparent = true;
-                            }
-                        }
-                        
-                        // Apply debug visualization if debug manager is available
-                        if (this.debugManager) {
-                            this.debugManager.applyWireframeToMesh(chunkKey, mesh);
-                        }
-                    } else {
-                        console.warn(`Failed to get material for chunk ${chunkKey}`);
-                        return;
+                    // Set initial opacity for crossfade if supported
+                    if ('opacity' in (transitionMaterial as any)) {
+                        (transitionMaterial as any).opacity = 1.0;
+                        (transitionMaterial as any).transparent = true;
+                    }
+                    
+                    if ('opacity' in clonedMaterial) {
+                        (clonedMaterial as any).opacity = 0.0;
+                        (clonedMaterial as any).transparent = true;
                     }
                 }
-            } catch (error) {
-                console.error(`Error generating mesh for chunk ${chunkKey}:`, error);
+
+                // Apply debug visualization if debug manager is available
+                if (this.debugManager) {
+                    this.debugManager.applyWireframeToMesh(chunkKey, mesh);
+                }
+
+                return true; // updated
+            } else {
+                // Mesh generation returned null (empty chunk) -> ensure we remove any existing
+                if (existingMesh) {
+                    this.removeChunkFromScene(chunk.x, chunk.y, chunk.z);
+                }
+                return true;
             }
+        } catch (error) {
+            console.error(`Error generating mesh for chunk ${chunkKey}:`, error);
+            return false;
         }
     }
     
@@ -471,8 +509,6 @@ export class World {
         
         // If any transitions were updated, request another frame
         if (needsUpdate) {
-            // This assumes you have a way to request a render frame
-            // If using a game loop, this might not be necessary
             if (typeof requestAnimationFrame === 'function') {
                 requestAnimationFrame(() => this.updateLODTransitions());
             }
@@ -537,18 +573,16 @@ export class World {
                 const chunk = this.chunks.get(chunkKey);
                 
                 if (!existingMesh) {
-                    // Si no hay un mesh existente, encolar la tarea de generación
+                    // If no mesh exists, queue the generation task
                     this.chunkQueue.addTask(chunkX, 0, chunkZ, mode, priority);
                 } else if (existingMesh.userData.mode !== mode) {
-                    // Si el modo de LOD ha cambiado, forzar una actualización
+                    // If the LOD mode changed, force update
                     if (chunk) {
-                        // Marcar el chunk como sucio para forzar la regeneración
                         chunk.markDirty();
-                        // Asegurarse de que el chunk se actualice con el nuevo modo
                         this.chunkQueue.addTask(chunkX, 0, chunkZ, mode, priority - 0.5);
                     }
                 } else if (chunk && chunk.isDirty) {
-                    // Si el chunk está marcado como sucio, encolar una actualización
+                    // If chunk is dirty, enqueue an update
                     this.chunkQueue.addTask(chunkX, 0, chunkZ, mode, priority);
                 }
             }
@@ -563,15 +597,51 @@ export class World {
     }
     
     public updateDirtyChunks(): void {
+        // First pass: collect all dirty chunks
+        const dirtyChunks: {chunk: Chunk, mode: 'detailed' | 'greedy'}[] = [];
+        
         for (const chunk of this.chunks.values()) {
             if (chunk.isDirty) {
                 const chunkKey = this.getChunkKey(chunk.x, chunk.y, chunk.z);
                 const mesh = this.chunkMeshes.get(chunkKey);
                 const mode = mesh?.userData.mode || 'detailed';
-
-                this.addChunkToScene(chunk, mode);
-                chunk.isDirty = false;
+                dirtyChunks.push({chunk, mode});
             }
+        }
+        
+        // Second pass: update all dirty chunks
+        for (const {chunk, mode} of dirtyChunks) {
+            try {
+                const updated = this.addChunkToScene(chunk, mode);
+                if (updated) {
+                    chunk.isDirty = false;
+                } else {
+                    // Keep marked as dirty so we will retry later
+                    chunk.isDirty = true;
+                }
+            } catch (error) {
+                console.error(`Error updating chunk (${chunk.x},${chunk.y},${chunk.z}):`, error);
+                // Keep the chunk marked as dirty so we can try again later
+                chunk.isDirty = true;
+            }
+        }
+        
+        // If we're in the browser, ensure the scene is marked for update and flag other attributes
+        if (typeof requestAnimationFrame === 'function') {
+            requestAnimationFrame(() => {
+                if (this.scene) {
+                    this.scene.traverse(obj => {
+                        if (obj instanceof THREE.Mesh) {
+                            const geom = obj.geometry as THREE.BufferGeometry | undefined;
+                            if (!geom) return;
+                            if (geom.attributes.position) geom.attributes.position.needsUpdate = true;
+                            if (geom.attributes.normal) geom.attributes.normal.needsUpdate = true;
+                            if (geom.attributes.uv) geom.attributes.uv.needsUpdate = true;
+                            if (geom.index) geom.index.needsUpdate = true;
+                        }
+                    });
+                }
+            });
         }
     }
     

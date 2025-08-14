@@ -225,6 +225,21 @@ export class Chunk {
         this.isDirty = true;
     }
     
+    /**
+     * Forces the chunk to regenerate its mesh on the next update
+     * This is called when a block is modified to ensure the mesh is updated
+     */
+    public forceMeshRegeneration(): void {
+        this.isDirty = true;
+        // Clear any existing mesh to force regeneration
+        if (this.mesh) {
+            if (this.mesh.geometry) {
+                this.mesh.geometry.dispose();
+            }
+            this.mesh = null;
+        }
+    }
+    
     // Starts a transition to a new LOD level
     public startTransitionToLOD(mode: 'detailed' | 'greedy'): void {
         if (this.currentLOD === mode) return;

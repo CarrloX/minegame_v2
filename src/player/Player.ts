@@ -242,8 +242,8 @@ export class Player {
     }
 
     public update(deltaTime: number): void {
-        // Update raycast first so other subsystems can use it
-        this.raycast();
+        // Update raycast first with force=true to ensure fresh data for this frame
+        this.raycast(true);
 
         const forward = new THREE.Vector3();
         const right = new THREE.Vector3();
