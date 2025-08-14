@@ -389,14 +389,15 @@ export class Chunk {
                 return;
             }
             
-            // Get or create material
-            const material = world.getMaterial ? world.getMaterial() : new THREE.MeshBasicMaterial({ 
-                color: 0x00ff00,
-                side: THREE.DoubleSide,
-                transparent: true,
-                alphaTest: 0.1
-            });
-            const ownedMaterial = !world.getMaterial;
+            // Get material from world (World will handle material management)
+            const material = world.getMaterial ? world.getMaterial() : null;
+            if (!material) {
+                console.warn('No material available for chunk mesh');
+                if (this.mesh) this.mesh.visible = false;
+                this.isDirty = false;
+                return;
+            }
+            const ownedMaterial = false; // World owns the material
             
             // Create a placeholder mesh if it doesn't exist
             if (!this.mesh) {
@@ -448,53 +449,98 @@ export class Chunk {
             // Use the worker to generate the mesh asynchronously
             const workerManager = WorkerManager.getInstance();
             
-            workerManager.generateMesh(blocks, this.x, this.y, this.z)
-                .then((meshData: MeshData | null) => {
-                    if (!meshData) {
-                        console.error(`[Chunk ${this.x},${this.y},${this.z}] Failed to generate mesh in worker - no data`);
-                        if (this.mesh) this.mesh.visible = false;
-                        return;
+            // Create a function to handle mesh updates
+            const updateMeshWithData = (meshData: MeshData | null) => {
+                if (!meshData) {
+                    console.error(`[Chunk ${chunkX},${chunkY},${chunkZ}] Failed to generate mesh in worker - no data`);
+                    if (this.mesh) this.mesh.visible = false;
+                    return;
+                }
+                
+                if (!this.mesh) return;
+                
+                try {
+                    let geometry: THREE.BufferGeometry;
+                    
+                    // Reuse existing geometry if possible, otherwise create a new one
+                    if (this.mesh.geometry instanceof THREE.BufferGeometry) {
+                        geometry = this.mesh.geometry;
+                        // Clear any existing attributes to prevent memory leaks
+                        geometry.dispose();
+                    } else {
+                        geometry = new THREE.BufferGeometry();
                     }
                     
-                    // Create or update the geometry with the worker's data
-                    if (this.mesh) {
-                        // Dispose of old geometry if it exists
-                        const oldGeometry = this.mesh.geometry as THREE.BufferGeometry;
-                        if (oldGeometry) oldGeometry.dispose();
-                        
-                        // Create new geometry with the worker's data
-                        const geometry = new THREE.BufferGeometry();
-                        
-                        try {
-                            // Set attributes from the worker's data
-                            geometry.setAttribute('position', new THREE.BufferAttribute(meshData.positions, 3));
-                            geometry.setAttribute('normal', new THREE.BufferAttribute(meshData.normals, 3));
-                            geometry.setAttribute('uv', new THREE.BufferAttribute(meshData.uvs, 2));
-                            geometry.setIndex(new THREE.BufferAttribute(meshData.indices, 1));
-                            
-                            // Compute bounding box and sphere for better culling and shadows
-                            geometry.computeBoundingBox();
-                            geometry.computeBoundingSphere();
-                            
-                            // Update the mesh
-                            this.mesh.geometry = geometry;
-                            this.mesh.visible = true;
-                            
-                        } catch (error) {
-                            console.error(`[Chunk ${chunkX},${chunkY},${chunkZ}] Error updating mesh:`, error);
-                            if (this.mesh) this.mesh.visible = false;
-                        } finally {
-                            // Only mark as not dirty after mesh generation is complete
-                            if (this.x === chunkX && this.y === chunkY && this.z === chunkZ) {
-                                this.isDirty = false;
-                            }
-                        }
+                    // Set attributes with the transferred buffers
+                    const positionAttr = new THREE.BufferAttribute(meshData.positions, 3);
+                    const normalAttr = new THREE.BufferAttribute(meshData.normals, 3);
+                    const uvAttr = new THREE.BufferAttribute(meshData.uvs, 2);
+                    const indexAttr = new THREE.BufferAttribute(meshData.indices, 1);
+                    
+                    // Mark attributes as needing update
+                    positionAttr.needsUpdate = true;
+                    normalAttr.needsUpdate = true;
+                    uvAttr.needsUpdate = true;
+                    indexAttr.needsUpdate = true;
+                    
+                    // Set attributes on the geometry
+                    geometry.setAttribute('position', positionAttr);
+                    geometry.setAttribute('normal', normalAttr);
+                    geometry.setAttribute('uv', uvAttr);
+                    geometry.setIndex(indexAttr);
+                    
+                    // Only compute bounds if we have vertices
+                    if (meshData.positions.length > 0) {
+                        geometry.computeBoundingBox();
+                        geometry.computeBoundingSphere();
                     }
-                })
-                .catch((error) => {
-                    console.error('Error generating mesh in worker:', error);
+                    
+                    // Update the mesh
+                    this.mesh.geometry = geometry;
+                    this.mesh.visible = meshData.positions.length > 0;
+                    
+                } catch (error) {
+                    console.error(`[Chunk ${chunkX},${chunkY},${chunkZ}] Error updating mesh:`, error);
                     if (this.mesh) this.mesh.visible = false;
-                });
+                } finally {
+                    // Only mark as not dirty after mesh generation is complete
+                    if (this.x === chunkX && this.y === chunkY && this.z === chunkZ) {
+                        this.isDirty = false;
+                    }
+                }
+            };
+            
+            // Generate mesh in worker
+            workerManager.generateMesh(blocks, this.x, this.y, this.z, 
+                (x: number, y: number, z: number) => {
+                    // World coordinate to chunk-relative coordinate conversion
+                    const chunkX = Math.floor(x / Chunk.SIZE);
+                    const chunkY = Math.floor(y / Chunk.HEIGHT);
+                    const chunkZ = Math.floor(z / Chunk.SIZE);
+                    
+                    // If the block is in this chunk, get it directly
+                    if (chunkX === this.x && chunkY === this.y && chunkZ === this.z) {
+                        return this.getBlock(
+                            x - (this.x * Chunk.SIZE),
+                            y - (this.y * Chunk.HEIGHT),
+                            z - (this.z * Chunk.SIZE)
+                        );
+                    }
+                    
+                    // Otherwise, get it from the world
+                    if (world && typeof world.getBlock === 'function') {
+                        return world.getBlock(x, y, z) || BlockType.AIR;
+                    }
+                    
+                    return BlockType.AIR;
+                }
+            )
+            .then(updateMeshWithData)
+            .catch((error) => {
+                console.error('Error generating mesh in worker:', error);
+                if (this.mesh) this.mesh.visible = false;
+                this.isDirty = true; // Mark as dirty to retry on next frame
+            });
             
             return;
         }
