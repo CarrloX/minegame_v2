@@ -30,7 +30,9 @@ export class Player {
     private boundOnKeyUp = (e: KeyboardEvent) => this.onKeyUp(e);
 
     private lastRaycastResult: RaycastResult | null = null;
-    private readonly RAYCAST_DISTANCE = 5; // Distancia máxima del rayo
+    private lastRaycastTime: number = 0;
+    private readonly RAYCAST_DISTANCE = 5; // Maximum raycast distance
+    private readonly RAYCAST_MAX_AGE = 100; // Maximum age of cached raycast in milliseconds
 
     public constructor(camera: THREE.PerspectiveCamera, controls: FirstPersonControls, world: World) {
         this.camera = camera;
@@ -90,140 +92,153 @@ export class Player {
     }
 
     /**
-     * Raycast using 3D DDA (Amanatides & Woo) which is precise and fast for voxels.
+     * Raycast using 3D DDA (Amanatides & Woo) for precise and fast voxel traversal.
+     * This implementation provides accurate block face detection and handles edge cases.
      */
-    public raycast(): RaycastResult | null {
+    public raycast(forceUpdate: boolean = false): RaycastResult | null {
+        // Return cached result if it's still valid and not forcing an update
+        const now = performance.now();
+        if (!forceUpdate && this.lastRaycastResult && (now - this.lastRaycastTime) < this.RAYCAST_MAX_AGE) {
+            return this.lastRaycastResult;
+        }
+
         const origin = this.camera.position.clone();
         const direction = new THREE.Vector3();
         this.camera.getWorldDirection(direction);
         direction.normalize();
 
+        // Calculate ray direction components
+        const dirX = direction.x;
+        const dirY = direction.y;
+        const dirZ = direction.z;
+
+        // Current block coordinates (integer)
+        let x = Math.floor(origin.x);
+        let y = Math.floor(origin.y);
+        let z = Math.floor(origin.z);
+
+        // Ray direction sign for stepping
+        const stepX = dirX > 0 ? 1 : -1;
+        const stepY = dirY > 0 ? 1 : -1;
+        const stepZ = dirZ > 0 ? 1 : -1;
+
+        // Calculate distance to next grid cell
+        const nextX = stepX > 0 ? Math.floor(origin.x) + 1 : Math.ceil(origin.x - 1);
+        const nextY = stepY > 0 ? Math.floor(origin.y) + 1 : Math.ceil(origin.y - 1);
+        const nextZ = stepZ > 0 ? Math.floor(origin.z) + 1 : Math.ceil(origin.z - 1);
+
+        // Calculate t values for when the ray crosses x, y, and z voxel boundaries
+        let tMaxX = dirX !== 0 ? (nextX - origin.x) / dirX : Number.MAX_VALUE;
+        let tMaxY = dirY !== 0 ? (nextY - origin.y) / dirY : Number.MAX_VALUE;
+        let tMaxZ = dirZ !== 0 ? (nextZ - origin.z) / dirZ : Number.MAX_VALUE;
+
+        // The change in t when taking a step (always positive)
+        const tDeltaX = dirX !== 0 ? stepX / dirX : Number.MAX_VALUE;
+        const tDeltaY = dirY !== 0 ? stepY / dirY : Number.MAX_VALUE;
+        const tDeltaZ = dirZ !== 0 ? stepZ / dirZ : Number.MAX_VALUE;
+
+        // Track which axis we stepped on (for normal calculation)
+        let faceX = 0, faceY = 0, faceZ = 0;
+        
+        // Current t value (distance along ray)
+        let t = 0;
+        
+        // Maximum distance to check
         const maxDistance = this.RAYCAST_DISTANCE;
 
-        // Starting voxel
-        let vx = Math.floor(origin.x);
-        let vy = Math.floor(origin.y);
-        let vz = Math.floor(origin.z);
-
-        // If origin is exactly on integer boundary and direction negative, shift starting voxel
-        // (not strictly necessary but helps edge cases)
-        if (origin.x === vx && direction.x < 0) vx--;
-        if (origin.y === vy && direction.y < 0) vy--;
-        if (origin.z === vz && direction.z < 0) vz--;
-
-        // Pre-check: if starting inside a solid block, skip it only if distance 0 (we probably want blocks in front)
-        const startBlock = this.world.getBlock(vx, vy, vz);
-        if (startBlock !== undefined && startBlock !== BlockType.AIR) {
-            // If camera is inside a block, advance a tiny bit along direction
-            // so we don't immediately hit the block we're inside.
-            origin.add(direction.clone().multiplyScalar(0.01));
-            vx = Math.floor(origin.x);
-            vy = Math.floor(origin.y);
-            vz = Math.floor(origin.z);
-        }
-
-        // Setup DDA
-        const stepX = direction.x > 0 ? 1 : (direction.x < 0 ? -1 : 0);
-        const stepY = direction.y > 0 ? 1 : (direction.y < 0 ? -1 : 0);
-        const stepZ = direction.z > 0 ? 1 : (direction.z < 0 ? -1 : 0);
-
-        const tDeltaX = stepX !== 0 ? Math.abs(1 / direction.x) : Infinity;
-        const tDeltaY = stepY !== 0 ? Math.abs(1 / direction.y) : Infinity;
-        const tDeltaZ = stepZ !== 0 ? Math.abs(1 / direction.z) : Infinity;
-
-        const fracX = origin.x - Math.floor(origin.x);
-        const fracY = origin.y - Math.floor(origin.y);
-        const fracZ = origin.z - Math.floor(origin.z);
-
-        let tMaxX = stepX > 0 ? (1 - fracX) * tDeltaX : (fracX) * tDeltaX;
-        let tMaxY = stepY > 0 ? (1 - fracY) * tDeltaY : (fracY) * tDeltaY;
-        let tMaxZ = stepZ > 0 ? (1 - fracZ) * tDeltaZ : (fracZ) * tDeltaZ;
-
-        // current traveled distance
-        let traveled = 0;
-
-        // If direction component is zero, tMax might be NaN; ensure Infinity
-        if (!isFinite(tMaxX)) tMaxX = Infinity;
-        if (!isFinite(tMaxY)) tMaxY = Infinity;
-        if (!isFinite(tMaxZ)) tMaxZ = Infinity;
+        // Safety counter to prevent infinite loops
+        const maxSteps = 2 * Math.ceil(maxDistance);
+        let steps = 0;
 
         // DDA loop
-        const maxIterations = 1000; // safety cap
-        for (let i = 0; i < maxIterations && traveled <= maxDistance; i++) {
-            // Check block at current voxel
-            const block = this.world.getBlock(vx, vy, vz);
+        while (t <= maxDistance && steps < maxSteps) {
+            // Check if current block is solid
+            const block = this.world.getBlock(x, y, z);
             if (block !== undefined && block !== BlockType.AIR) {
-                // We hit a block at voxel (vx,vy,vz).
-                // The hit distance is traveled (approx). Build normal based on last stepped axis.
-                // But we need to determine which face we entered from. When starting, none stepped yet;
-                // approximate by looking at which tMax was smallest in previous iteration — easier is:
-                // Determine the minimal of the three tMax values (the one causing the step).
-                // We can reconstruct normal by checking which side the ray came from:
-                const nx = 0, ny = 0, nz = 0;
-                let normal = new THREE.Vector3();
-
-                // To infer normal, look at which tMax was smallest in the step that placed us here.
-                // Since we haven't stored that, easier approach: compute signed distances to block center:
-                const hitPos = origin.clone().add(direction.clone().multiplyScalar(traveled));
-                const localX = hitPos.x - vx - 0.5;
-                const localY = hitPos.y - vy - 0.5;
-                const localZ = hitPos.z - vz - 0.5;
-                const ax = Math.abs(localX), ay = Math.abs(localY), az = Math.abs(localZ);
-                if (ax > ay && ax > az) {
-                    normal.set(localX > 0 ? 1 : -1, 0, 0);
-                } else if (ay > az) {
-                    normal.set(0, localY > 0 ? 1 : -1, 0);
+                // Calculate face normal based on which boundary we hit
+                const normal = new THREE.Vector3();
+                
+                // Find which face was hit by checking which t was the smallest
+                if (t === tMaxX + tDeltaX * faceX) {
+                    normal.set(-stepX, 0, 0);
+                } else if (t === tMaxY + tDeltaY * faceY) {
+                    normal.set(0, -stepY, 0);
                 } else {
-                    normal.set(0, 0, localZ > 0 ? 1 : -1);
+                    normal.set(0, 0, -stepZ);
                 }
 
                 const result: RaycastResult = {
-                    position: new THREE.Vector3(vx, vy, vz),
+                    position: new THREE.Vector3(x, y, z),
                     normal: normal.normalize(),
                     blockType: block,
-                    distance: traveled
+                    distance: t
                 };
+                
                 this.lastRaycastResult = result;
+                this.lastRaycastTime = now;
                 return result;
             }
 
-            // Advance DDA: choose smallest tMax
+            // Step to next voxel
             if (tMaxX < tMaxY) {
                 if (tMaxX < tMaxZ) {
-                    // step x
-                    vx += stepX;
-                    traveled = tMaxX;
+                    t = tMaxX;
                     tMaxX += tDeltaX;
+                    x += stepX;
+                    faceX++;
                 } else {
-                    // step z
-                    vz += stepZ;
-                    traveled = tMaxZ;
+                    t = tMaxZ;
                     tMaxZ += tDeltaZ;
+                    z += stepZ;
+                    faceZ++;
                 }
             } else {
                 if (tMaxY < tMaxZ) {
-                    // step y
-                    vy += stepY;
-                    traveled = tMaxY;
+                    t = tMaxY;
                     tMaxY += tDeltaY;
+                    y += stepY;
+                    faceY++;
                 } else {
-                    // step z
-                    vz += stepZ;
-                    traveled = tMaxZ;
+                    t = tMaxZ;
                     tMaxZ += tDeltaZ;
+                    z += stepZ;
+                    faceZ++;
                 }
             }
+            
+            steps++;
         }
 
+        // No block hit within max distance
         this.lastRaycastResult = null;
+        this.lastRaycastTime = now;
         return null;
     }
 
     /**
      * Obtiene el resultado del último raycast realizado
      */
-    public getLastRaycastResult(): RaycastResult | null {
+    /**
+     * Gets the last raycast result, performing a new raycast if the cached result is too old
+     * @param forceRefresh If true, always perform a new raycast
+     * @returns The raycast result or null if no block was hit
+     */
+    public getLastRaycastResult(forceRefresh: boolean = false): RaycastResult | null {
+        const now = performance.now();
+        const isStale = now - this.lastRaycastTime > this.RAYCAST_MAX_AGE;
+        
+        if (forceRefresh || isStale || this.lastRaycastResult === null) {
+            return this.raycast();
+        }
         return this.lastRaycastResult;
+    }
+
+    /**
+     * Performs a fresh raycast and updates the last raycast result
+     * @returns The raycast result or null if no block was hit
+     */
+    public updateRaycast(): RaycastResult | null {
+        return this.raycast();
     }
 
     public update(deltaTime: number): void {

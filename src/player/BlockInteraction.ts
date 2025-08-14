@@ -1,84 +1,84 @@
+import * as THREE from 'three';
 import { Player } from './Player';
 import { World } from '../world/World';
 import { BlockType } from '../world/BlockType';
-
-/**
- * Handles player interaction with blocks (mining, placing, etc.)
- */
 export class BlockInteraction {
     private player: Player;
     private world: World;
     private domElement: HTMLElement;
+    private game: any; // Reference to Game instance if needed
 
     // Configuration
     private readonly MAX_DISTANCE = 5; // Maximum distance for block interaction
 
-    // Bound handler so we can remove it later
-    private boundPointerDown = (e: PointerEvent) => this.onPointerDown(e);
-
-    constructor(player: Player, world: World, domElement: HTMLElement) {
+    constructor(player: Player, world: World, domElement: HTMLElement, game?: any) {
         this.player = player;
         this.world = world;
         this.domElement = domElement;
+        this.game = game;
 
+        // Bind methods
+        this.onPointerDown = this.onPointerDown.bind(this);
+        
         this.initEventListeners();
     }
 
-    /**
-     * Initialize event listeners for block interaction
-     */
     private initEventListeners(): void {
-        // Use pointerdown (works better with pointer lock)
-        this.domElement.addEventListener('pointerdown', this.boundPointerDown, { passive: false });
-
-        // Prevent context menu on right click to allow for block placement
+        // Use pointerdown with passive: false to allow preventDefault()
+        this.domElement.addEventListener('pointerdown', this.onPointerDown, { passive: false });
+        
+        // Prevent context menu on right click
         this.domElement.addEventListener('contextmenu', (e) => {
             e.preventDefault();
         });
     }
 
-    /**
-     * Handle pointer down events for block interaction
-     */
     private onPointerDown(event: PointerEvent): void {
-        // Only handle left mouse button for block destruction
-        if (event.button !== 0) return;
-
-        // Prevent default to avoid undesired browser behavior
+        if (event.button !== 0) return; // Only left click
         event.preventDefault();
 
-        // Get the last raycast result from the player
-        const raycastResult = this.player.getLastRaycastResult();
+        // Get fresh raycast data
+        const raycastResult = this.player.getLastRaycastResult(true); // Force fresh raycast
 
-        if (!raycastResult) return;
-        if (raycastResult.distance > this.MAX_DISTANCE) return;
-
-        // Get the block position that was hit
-        const blockX = Math.floor(raycastResult.position.x);
-        const blockY = Math.floor(raycastResult.position.y);
-        const blockZ = Math.floor(raycastResult.position.z);
-
-        console.log(`Attempting to destroy block at (${blockX}, ${blockY}, ${blockZ})`);
-
-        // Optional sanity check: confirm the block still matches the raycast info
-        const current = this.world.getBlock(blockX, blockY, blockZ);
-        if (current === undefined || current === BlockType.AIR) {
-            console.warn('Target block already gone or undefined');
+        if (!raycastResult || raycastResult.distance > this.MAX_DISTANCE) {
+            this.clearHighlight();
             return;
         }
 
-        // Remove the block at the hit position (this marks chunks dirty via World.setBlock)
-        this.world.setBlock(blockX, blockY, blockZ, BlockType.AIR);
+        // Get block position
+        const blockPos = new THREE.Vector3(
+            Math.floor(raycastResult.position.x),
+            Math.floor(raycastResult.position.y),
+            Math.floor(raycastResult.position.z)
+        );
 
-        // IMPORTANT: don't force an immediate rebuild of all chunks here.
-        // Let the main loop call world.updateDirtyChunks() to batch updates.
-        console.log(`Block destroyed at (${blockX}, ${blockY}, ${blockZ})`);
+        // Verify the block exists and isn't air
+        const currentBlock = this.world.getBlock(blockPos.x, blockPos.y, blockPos.z);
+        if (currentBlock === undefined || currentBlock === BlockType.AIR) {
+            this.clearHighlight();
+            return;
+        }
+
+        console.log(`Destroying block at (${blockPos.x}, ${blockPos.y}, ${blockPos.z})`);
+
+        // Remove the block
+        this.world.setBlock(blockPos.x, blockPos.y, blockPos.z, BlockType.AIR);
+        
+        // Force update chunks
+        this.world.updateDirtyChunks();
+        
+        // Clear highlight
+        this.clearHighlight();
     }
 
-    /**
-     * Clean up event listeners
-     */
+    private clearHighlight(): void {
+        // Clear highlight through game if available
+        if (this.game && typeof this.game.updateHighlightBox === 'function') {
+            this.game.updateHighlightBox(null);
+        }
+    }
+
     public dispose(): void {
-        this.domElement.removeEventListener('pointerdown', this.boundPointerDown);
+        this.domElement.removeEventListener('pointerdown', this.onPointerDown);
     }
 }

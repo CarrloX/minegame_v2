@@ -44,7 +44,8 @@ export class Game {
         this.blockInteraction = new BlockInteraction(
             this.player,
             this.world,
-            this.renderer.getRenderer().domElement
+            this.renderer.getRenderer().domElement,
+            this // Pass the game instance for highlight management
         );
         // Event listeners are initialized in the BlockInteraction constructor
         
