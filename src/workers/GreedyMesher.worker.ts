@@ -11,9 +11,9 @@ type Group = { key: string; blockType: number; face: 'top'|'bottom'|'side'; star
 class GreedyMesherWorker {
   // Map blockType + face to atlas tile coords (u,v tile indices)
   private static readonly TILE_MAP: Record<number, { top: [number,number], side: [number,number], bottom: [number,number] }> = {
-    [BlockType.GRASS]: { top: [0,0], side: [3,0], bottom: [2,0] },
-    [BlockType.DIRT]:  { top: [2,0], side: [2,0], bottom: [2,0] },
-    [BlockType.STONE]: { top: [1,0], side: [1,0], bottom: [1,0] },
+    [BlockType.GRASS]: { top: [0,0], side: [2,0], bottom: [1,0] }, // Side texture at [2,0] to match the atlas
+    [BlockType.DIRT]:  { top: [1,0], side: [1,0], bottom: [1,0] },  // Dirt texture at [1,0]
+    [BlockType.STONE]: { top: [3,0], side: [3,0], bottom: [3,0] },  // Stone texture at [3,0]
     // add more as needed
   };
 
@@ -30,6 +30,29 @@ class GreedyMesherWorker {
     const v0 = 1.0 - ((vTile + 1) * UV_TILE) + BLEED;
     const u1 = ((uTile + 1) * UV_TILE) - BLEED;
     const v1 = 1.0 - (vTile * UV_TILE) - BLEED;
+
+    // Debug log for grass side texture
+    if (blockType === BlockType.GRASS && face === 'side') {
+      console.log('Grass side UV calculations:', {
+        blockType,
+        face,
+        tile,
+        uTile,
+        vTile,
+        UV_TILE,
+        BLEED,
+        u0,
+        v0,
+        u1,
+        v1,
+        finalUVs: [
+          [u0, v1],  // bottom-left
+          [u1, v1],  // bottom-right
+          [u1, v0],  // top-right
+          [u0, v0]   // top-left
+        ]
+      });
+    }
 
     // Return UVs in the order: bottom-left, bottom-right, top-right, top-left
     return [

@@ -5,7 +5,7 @@ import { BlockType } from './BlockType';
  */
 export namespace TextureAtlas {
     // Texture atlas configuration
-    export const ATLAS_SIZE = 2; // Number of textures per row/column in the atlas
+    export const ATLAS_SIZE = 4; // Number of textures per row/column in the atlas
     export const TEXTURE_SIZE = 1 / ATLAS_SIZE; // Size of each texture in UV coordinates (0-1)
 
     // Texture coordinates for each block type and face
@@ -20,11 +20,11 @@ export namespace TextureAtlas {
     export const TEXTURE_COORDS: Record<BlockType, TextureCoords> = {
         [BlockType.AIR]: { x: 0, y: 0 },
         [BlockType.GRASS]: { x: 0, y: 0 },  // Top of grass
-        [BlockType.DIRT]: { x: 0, y: 1 },   // Dirt (same as bottom of grass)
-        [BlockType.STONE]: { x: 1, y: 1 },  // Stone
-        [BlockType.SAND]: { x: 1, y: 0 },   // Sand
-        [BlockType.WOOD]: { x: 0, y: 2 },   // Wood/log
-        [BlockType.LEAVES]: { x: 1, y: 2 }, // Leaves
+        [BlockType.DIRT]: { x: 1, y: 0 },   // Dirt (same as bottom of grass)
+        [BlockType.STONE]: { x: 3, y: 0 },  // Stone
+        [BlockType.SAND]: { x: 1, y: 0 },   // Sand (temporarily using dirt)
+        [BlockType.WOOD]: { x: 0, y: 1 },   // Wood/log
+        [BlockType.LEAVES]: { x: 1, y: 1 }, // Leaves
         [BlockType.GRASS_SIDE]: { x: 2, y: 0 } // Side of grass
     };
 
