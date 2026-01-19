@@ -144,10 +144,16 @@ export class World {
     /**
      * Sets the Three.js scene and debug manager for this world
      */
-    public setScene(scene: THREE.Scene, debugManager: DebugManager): void {
+    public setScene(scene: THREE.Scene, debugManager: DebugManager, camera?: THREE.Camera): void {
         this.debugManager = debugManager;
         this.removeAllMeshes();
         this.scene = scene;
+
+        // Store camera reference for frustum culling
+        if (camera) {
+            this.scene.userData.camera = camera;
+        }
+
         this.addAllChunksToScene();
     }
 
@@ -490,13 +496,13 @@ export class World {
     // Updates all active LOD transitions
     private updateLODTransitions(): void {
         let needsUpdate = false;
-        
+
         // Update all chunks that are in transition
         for (const chunk of this.chunks.values()) {
             if (chunk.currentLOD === 'transitioning') {
                 const wasUpdated = chunk['updateTransition'] ? chunk['updateTransition']() : false;
                 needsUpdate = needsUpdate || wasUpdated;
-                
+
                 // If transition is complete, clean up
                 if (chunk.currentLOD !== 'transitioning' && chunk['transitionMesh']) {
                     this.scene?.remove(chunk['transitionMesh']);
@@ -504,11 +510,63 @@ export class World {
                 }
             }
         }
-        
+
         // If any transitions were updated, request another frame
         if (needsUpdate) {
             if (typeof requestAnimationFrame === 'function') {
                 requestAnimationFrame(() => this.updateLODTransitions());
+            }
+        }
+    }
+
+    /**
+     * Updates frustum culling by hiding chunks that are outside the camera's view
+     * This is more aggressive than Three.js automatic frustum culling
+     */
+    private updateFrustumCulling(playerPosition: THREE.Vector3): void {
+        if (!this.scene) return;
+
+        // Create a frustum from the camera
+        const camera = this.scene.userData.camera as THREE.Camera;
+        if (!camera) return;
+
+        const frustum = new THREE.Frustum();
+        const matrix = new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+        frustum.setFromProjectionMatrix(matrix);
+
+        // Get player chunk coordinates
+        const playerChunkX = Math.floor(playerPosition.x / Chunk.SIZE);
+        const playerChunkZ = Math.floor(playerPosition.z / Chunk.SIZE);
+
+        // Update visibility for all chunk meshes
+        for (const [chunkKey, mesh] of this.chunkMeshes.entries()) {
+            const [x, y, z] = chunkKey.split(',').map(Number);
+
+            // Calculate chunk center position
+            const chunkCenter = new THREE.Vector3(
+                (x + 0.5) * Chunk.SIZE,
+                (y + 0.5) * Chunk.HEIGHT,
+                (z + 0.5) * Chunk.SIZE
+            );
+
+            // Create a bounding sphere for the chunk (approximation)
+            const chunkRadius = Math.sqrt(Chunk.SIZE * Chunk.SIZE + Chunk.HEIGHT * Chunk.HEIGHT + Chunk.SIZE * Chunk.SIZE) * 0.5;
+            const boundingSphere = new THREE.Sphere(chunkCenter, chunkRadius);
+
+            // Check if chunk is in frustum
+            const isInFrustum = frustum.intersectsSphere(boundingSphere);
+
+            // Additional check: hide chunks that are too far or behind the player
+            const distanceToPlayer = Math.sqrt(
+                Math.pow(x - playerChunkX, 2) + Math.pow(z - playerChunkZ, 2)
+            );
+
+            // Hide chunks that are outside frustum or too far
+            const shouldBeVisible = isInFrustum && distanceToPlayer <= this.viewDistance;
+
+            // Only update visibility if it changed
+            if (mesh.visible !== shouldBeVisible) {
+                mesh.visible = shouldBeVisible;
             }
         }
     }

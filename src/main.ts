@@ -42,7 +42,7 @@ window.addEventListener('DOMContentLoaded', () => {
         
         // Create the game instance with the renderer, world, and player
         const debugManager = new DebugManager(world);
-        world.setScene(renderer.getScene(), debugManager);
+        world.setScene(renderer.getScene(), debugManager, camera);
         const game = new Game(renderer, world, player, debugManager);
         
         debugManager.initKeyboardControls();
