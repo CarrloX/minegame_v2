@@ -7,6 +7,8 @@ import { CrosshairManager } from '../ui/CrosshairManager';
 import { BlockType } from '../world/BlockType';
 import { BlockOutlineHelper } from '../rendering/BlockOutlineHelper';
 import { BlockInteraction } from '../player/BlockInteraction';
+import { Inventory } from '../player/Inventory';
+import { InventoryBar } from '../ui/InventoryBar';
 
 export class Game {
     private renderer: Renderer;
@@ -14,6 +16,8 @@ export class Game {
     private player: Player;
     private debugManager: DebugManager;
     private crosshairManager: CrosshairManager | null = null;
+    private inventory!: Inventory;
+    private inventoryBar!: InventoryBar;
     private isRunning: boolean = false;
     private lastTime: number = 0;
     private animationFrameId: number | null = null;
@@ -32,19 +36,24 @@ export class Game {
         this.world = world;
         this.player = player;
         this.debugManager = debugManager;
-        
+
+        // Initialize inventory system
+        this.inventory = new Inventory();
+        this.inventoryBar = new InventoryBar(this.inventory);
 
         // Initialize crosshair manager
         this.initializeCrosshair();
-        
+
         // Initialize block outline helper
         this.blockOutlineHelper = new BlockOutlineHelper(this.renderer.getScene(), this.world);
-        
-        // Initialize block interaction for block destruction
+
+        // Initialize block interaction for block destruction/placement
         this.blockInteraction = new BlockInteraction(
             this.player,
             this.world,
             this.renderer.getRenderer().domElement,
+            this.inventory,
+            this.inventoryBar, // Pass inventory bar for UI updates
             this // Pass the game instance for highlight management
         );
         // Event listeners are initialized in the BlockInteraction constructor
@@ -86,7 +95,6 @@ export class Game {
         // If there was a previously highlighted block that's no longer being targeted, restore it
         // Reemplaza el bloque de "restauración" por esto:
         if (this.hoveredBlock) {
-            const currentType = this.world.getBlock(this.hoveredBlock.position.x, this.hoveredBlock.position.y, this.hoveredBlock.position.z);
             if (!raycastResult || !this.hoveredBlock.position.equals(raycastResult.position)) {
             // Si el bloque fue modificado por otra acción (minado / colocado), NO restauramos.
             // Sólo limpiamos nuestro estado local y ocultamos el outline.
@@ -242,25 +250,30 @@ export class Game {
      */
     public dispose(): void {
         this.stop();
-        
+
+        // Clean up inventory bar
+        if (this.inventoryBar) {
+            this.inventoryBar.dispose();
+        }
+
         // Clean up block interaction
         if (this.blockInteraction) {
             this.blockInteraction.dispose();
             this.blockInteraction = null;
         }
-        
+
         // Clean up the world
         this.world.dispose();
-        
+
         // Clean up the renderer
         this.renderer.dispose();
-        
+
         // Clean up the player
         this.player.dispose();
-        
+
         // Clean up debug manager
         this.debugManager.dispose();
-        
+
         console.log('Game disposed');
     }
 }
