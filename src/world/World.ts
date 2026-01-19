@@ -521,7 +521,7 @@ export class World {
 
     /**
      * Updates frustum culling by hiding chunks that are outside the camera's view
-     * This is more aggressive than Three.js automatic frustum culling
+     * Includes aggressive occlusion culling to hide chunks behind the player
      */
     private updateFrustumCulling(playerPosition: THREE.Vector3): void {
         if (!this.scene) return;
@@ -533,6 +533,10 @@ export class World {
         const frustum = new THREE.Frustum();
         const matrix = new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
         frustum.setFromProjectionMatrix(matrix);
+
+        // Calculate player's viewing direction (forward vector)
+        const forward = new THREE.Vector3(0, 0, -1);
+        forward.applyQuaternion(camera.quaternion);
 
         // Get player chunk coordinates
         const playerChunkX = Math.floor(playerPosition.x / Chunk.SIZE);
@@ -556,13 +560,36 @@ export class World {
             // Check if chunk is in frustum
             const isInFrustum = frustum.intersectsSphere(boundingSphere);
 
-            // Additional check: hide chunks that are too far or behind the player
+            // Calculate vector from player to chunk
+            const playerToChunk = new THREE.Vector3(
+                chunkCenter.x - playerPosition.x,
+                0, // Ignore Y for horizontal occlusion
+                chunkCenter.z - playerPosition.z
+            ).normalize();
+
+            // Calculate dot product to determine if chunk is behind player
+            const dotProduct = forward.dot(playerToChunk);
+
+            // Distance check
             const distanceToPlayer = Math.sqrt(
                 Math.pow(x - playerChunkX, 2) + Math.pow(z - playerChunkZ, 2)
             );
 
-            // Hide chunks that are outside frustum or too far
-            const shouldBeVisible = isInFrustum && distanceToPlayer <= this.viewDistance;
+            // Less aggressive occlusion culling
+            // Only hide chunks that are significantly behind AND at least 2 chunks away
+            const isFarBehindPlayer = dotProduct < -0.8 && distanceToPlayer >= 2;
+            // Always show chunks within 1 chunk distance (player's immediate area)
+            const isVeryClose = distanceToPlayer < 1.5;
+            // Always show the chunk the player is currently in
+            const isPlayerChunk = (x === playerChunkX && z === playerChunkZ);
+
+            // Hide chunks that are:
+            // 1. Outside frustum, OR
+            // 2. Too far, OR
+            // 3. Significantly behind the player AND not too close
+            const shouldBeVisible = isInFrustum &&
+                                   distanceToPlayer <= this.viewDistance &&
+                                   (!isFarBehindPlayer || isVeryClose || isPlayerChunk);
 
             // Only update visibility if it changed
             if (mesh.visible !== shouldBeVisible) {
@@ -570,6 +597,8 @@ export class World {
             }
         }
     }
+
+
     
     public update(playerPosition: THREE.Vector3): void {
         this.loadChunksAroundPlayer(playerPosition);
