@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import Stats from 'stats.js';
 import { World } from '../world/World';
+import { ResourcePool } from '../core/ResourcePool';
 
 export class DebugManager {
     private world: World;
@@ -117,6 +118,7 @@ export class DebugManager {
 
     public updateStats(): void {
         this.updateGeometryStats();
+        this.updatePoolStats();
         this.stats.update();
     }
 
@@ -191,42 +193,55 @@ export class DebugManager {
         console.log(`[Chunk Regen] (${chunkX},${chunkY},${chunkZ}) ${mode}: ${vertices} verts`);
     }
 
-    private applyCustomStatsStyling(): void {
-        // Simple styling: just make fonts bigger and hide empty graphs
-        const panels = this.stats.dom.children;
-        for (let i = 0; i < panels.length; i++) {
-            const panel = panels[i] as HTMLElement;
+    public updatePoolStats(): void {
+        const pool = ResourcePool.getInstance();
+        const stats = pool.getStats();
 
-            // Make fonts bigger for better readability
-            panel.style.fontSize = '16px';
-            panel.style.fontWeight = 'bold';
-
-            // Style the value (second div) - make it even bigger
-            const valueDiv = panel.children[1] as HTMLElement;
-            if (valueDiv) {
-                valueDiv.style.fontSize = '20px';
-                valueDiv.style.fontWeight = 'bold';
-                valueDiv.style.color = 'white';
-            }
-
-            // Hide empty graph canvases for custom panels (they're just white boxes)
-            if (i >= 1) { // Skip FPS panel, only hide graphs for custom panels
-                const canvases = panel.querySelectorAll('canvas');
-                canvases.forEach((canvas: any) => {
-                    canvas.style.display = 'none';
-                    canvas.style.visibility = 'hidden';
-                    canvas.style.width = '0px';
-                    canvas.style.height = '0px';
-                });
-
-                // Also try to hide any other graph-related elements
-                const allChildren = panel.querySelectorAll('*');
-                allChildren.forEach((child: any) => {
-                    if (child.tagName === 'CANVAS') {
-                        child.remove(); // Completely remove canvas elements
-                    }
-                });
-            }
+        // Create or update pool stats display
+        let poolStatsElement = document.getElementById('pool-stats');
+        if (!poolStatsElement) {
+            poolStatsElement = document.createElement('div');
+            poolStatsElement.id = 'pool-stats';
+            poolStatsElement.style.cssText = `
+                position: absolute;
+                top: 80px;
+                right: 80px;
+                background: rgba(0, 0, 0, 0.9);
+                border: 1px solid #555;
+                border-radius: 5px;
+                padding: 5px;
+                font-family: monospace;
+                font-size: 11px;
+                color: white;
+                z-index: 10000;
+                display: none;
+                max-width: 200px;
+            `;
+            document.body.appendChild(poolStatsElement);
         }
+
+        // Update pool stats content
+        const totalGeometries = Object.values(stats.geometries).reduce((sum, count) => sum + count, 0);
+        const totalAttributes = Object.values(stats.attributes.positions).reduce((sum, count) => sum + count, 0) +
+                              Object.values(stats.attributes.normals).reduce((sum, count) => sum + count, 0) +
+                              Object.values(stats.attributes.uvs).reduce((sum, count) => sum + count, 0) +
+                              Object.values(stats.attributes.indices).reduce((sum, count) => sum + count, 0);
+
+        poolStatsElement.innerHTML = `
+            <div style="font-size: 10px; color: #ccc; margin-bottom: 3px;">Resource Pool:</div>
+            <div style="font-size: 12px; font-weight: bold; color: #4CAF50;">Geoms: ${totalGeometries}</div>
+            <div style="font-size: 12px; font-weight: bold; color: #2196F3;">Attrs: ${totalAttributes}</div>
+            <div style="font-size: 9px; color: #888; margin-top: 2px;">
+                S:${stats.geometries.small}|${stats.attributes.positions.small}<br>
+                M:${stats.geometries.medium}|${stats.attributes.positions.medium}<br>
+                L:${stats.geometries.large}|${stats.attributes.positions.large}<br>
+                XL:${stats.geometries.xlarge}|${stats.attributes.positions.xlarge}
+            </div>
+        `;
+
+        // Toggle visibility with F3
+        const isVisible = this.stats.dom.style.display !== 'none';
+        poolStatsElement.style.display = isVisible ? 'block' : 'none';
     }
+
 }

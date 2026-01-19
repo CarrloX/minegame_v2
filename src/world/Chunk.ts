@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { BlockType } from './BlockType';
 import { TextureAtlas } from './TextureAtlas';
 import { WorkerManager, type MeshData } from '../workers/WorkerManager';
-import { DebugManager } from '../debug/DebugManager';
+import { ResourcePool } from '../core/ResourcePool';
 
 /**
  * Minimal interface for world objects that can be used for block queries
@@ -343,11 +343,30 @@ export class Chunk {
      * Only disposes of materials that are owned by this chunk
      */
     public dispose(): void {
+        const pool = ResourcePool.getInstance();
+
         const disposeMesh = (mesh: THREE.Mesh | null) => {
             if (!mesh) return;
-            
-            if (mesh.geometry) mesh.geometry.dispose();
-            
+
+            // Release geometry attributes to pool before disposing geometry
+            if (mesh.geometry) {
+                const geometry = mesh.geometry as THREE.BufferGeometry;
+
+                // Release attributes to pool
+                const positionAttr = geometry.getAttribute('position') as THREE.BufferAttribute;
+                const normalAttr = geometry.getAttribute('normal') as THREE.BufferAttribute;
+                const uvAttr = geometry.getAttribute('uv') as THREE.BufferAttribute;
+                const indexAttr = geometry.getIndex() as THREE.BufferAttribute;
+
+                if (positionAttr) pool.releaseAttribute(positionAttr, 'position');
+                if (normalAttr) pool.releaseAttribute(normalAttr, 'normal');
+                if (uvAttr) pool.releaseAttribute(uvAttr, 'uv');
+                if (indexAttr) pool.releaseAttribute(indexAttr, 'index');
+
+                // Release geometry to pool instead of disposing
+                pool.releaseGeometry(geometry);
+            }
+
             // Only dispose of materials if this chunk owns them
             const ownedMaterial = mesh.userData?.ownedMaterial || false;
             if (ownedMaterial && mesh.material) {
@@ -358,7 +377,7 @@ export class Chunk {
                 }
             }
         };
-        
+
         disposeMesh(this.mesh);
         disposeMesh(this.transitionMesh);
         this.transitionMesh = null;
@@ -697,28 +716,42 @@ export class Chunk {
                 const positionArray = new Float32Array(this.positionArray.buffer, 0, this.vertexCount * 3);
                 const normalArray = new Float32Array(this.normalArray.buffer, 0, this.vertexCount * 3);
                 const uvArray = new Float32Array(this.uvArray.buffer, 0, this.vertexCount * 2);
-                
+
+                const pool = ResourcePool.getInstance();
+
                 // Update position attribute
                 if (positionAttr && positionAttr.count === this.vertexCount) {
                     positionAttr.copyArray(positionArray);
                     positionAttr.needsUpdate = true;
                 } else {
+                    // Release old attribute to pool if it exists
+                    if (positionAttr) {
+                        pool.releaseAttribute(positionAttr, 'position');
+                    }
                     geometry.setAttribute('position', new THREE.BufferAttribute(positionArray, 3));
                 }
-                
+
                 // Update normal attribute
                 if (normalAttr && normalAttr.count === this.vertexCount) {
                     normalAttr.copyArray(normalArray);
                     normalAttr.needsUpdate = true;
                 } else {
+                    // Release old attribute to pool if it exists
+                    if (normalAttr) {
+                        pool.releaseAttribute(normalAttr, 'normal');
+                    }
                     geometry.setAttribute('normal', new THREE.BufferAttribute(normalArray, 3));
                 }
-                
+
                 // Update UV attribute
                 if (uvAttr && uvAttr.count === this.vertexCount) {
                     uvAttr.copyArray(uvArray);
                     uvAttr.needsUpdate = true;
                 } else {
+                    // Release old attribute to pool if it exists
+                    if (uvAttr) {
+                        pool.releaseAttribute(uvAttr, 'uv');
+                    }
                     geometry.setAttribute('uv', new THREE.BufferAttribute(uvArray, 2));
                 }
                 
