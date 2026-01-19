@@ -69,3 +69,43 @@ canvas {
     height: 100vh;
     overflow: hidden; /* Prevent scrollbars */
 }
+
+/* Stats.js panel styling for better visibility */
+.statsjs {
+    background: rgba(0, 0, 0, 0.8) !important;
+    border: 1px solid #555 !important;
+    border-radius: 5px !important;
+    font-family: monospace !important;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.5) !important;
+}
+
+.statsjs > div {
+    background: rgba(0, 0, 0, 0.95) !important;
+    color: white !important;
+    border: 1px solid #444 !important;
+    border-radius: 3px !important;
+    font-size: 14px !important;
+    font-weight: bold !important;
+    text-align: center !important;
+    min-width: 80px !important;
+    padding: 4px 8px !important;
+    margin: 2px !important;
+}
+
+.statsjs > div > div:first-child {
+    color: #ccc !important;
+    font-size: 10px !important;
+    font-weight: normal !important;
+    margin-bottom: 3px !important;
+}
+
+.statsjs > div > div:last-child {
+    color: white !important;
+    font-size: 16px !important;
+    font-weight: bold !important;
+}
+
+/* Hide the graph canvases for custom panels (they're empty anyway) */
+.statsjs > div:nth-child(n+2) canvas {
+    display: none !important;
+}

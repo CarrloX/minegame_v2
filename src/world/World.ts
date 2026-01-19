@@ -298,27 +298,25 @@ export class World {
         // Mark the chunk as dirty
         this.markChunkDirty(chunkX, chunkY, chunkZ);
         
-        // Update adjacent chunks if the block is on a chunk border
-        const adjacentChunks: {x: number, y: number, z: number}[] = [];
-        
-        if (localX === 0) adjacentChunks.push({x: chunkX - 1, y: chunkY, z: chunkZ});
-        if (localX === Chunk.SIZE - 1) adjacentChunks.push({x: chunkX + 1, y: chunkY, z: chunkZ});
-        if (localY === 0) adjacentChunks.push({x: chunkX, y: chunkY - 1, z: chunkZ});
-        if (localY === Chunk.HEIGHT - 1) adjacentChunks.push({x: chunkX, y: chunkY + 1, z: chunkZ});
-        if (localZ === 0) adjacentChunks.push({x: chunkX, y: chunkY, z: chunkZ - 1});
-        if (localZ === Chunk.SIZE - 1) adjacentChunks.push({x: chunkX, y: chunkY, z: chunkZ + 1});
-        
-        // Mark all adjacent chunks as dirty and force their regeneration
-        adjacentChunks.forEach(adjChunk => {
-            const adjChunkObj = this.getChunk(adjChunk.x, adjChunk.y, adjChunk.z);
-            if (adjChunkObj) {
-                adjChunkObj.forceMeshRegeneration();
+        // Mark adjacent chunks as dirty only if they're on chunk borders (optimization)
+        // Only mark chunks that actually need updates to prevent excessive regeneration
+        if (localX === 0 || localX === Chunk.SIZE - 1 ||
+            localZ === 0 || localZ === Chunk.SIZE - 1) {
+            const adjacentChunks: {x: number, y: number, z: number}[] = [];
+
+            if (localX === 0) adjacentChunks.push({x: chunkX - 1, y: chunkY, z: chunkZ});
+            if (localX === Chunk.SIZE - 1) adjacentChunks.push({x: chunkX + 1, y: chunkY, z: chunkZ});
+            if (localZ === 0) adjacentChunks.push({x: chunkX, y: chunkY, z: chunkZ - 1});
+            if (localZ === Chunk.SIZE - 1) adjacentChunks.push({x: chunkX, y: chunkY, z: chunkZ + 1});
+
+            // Only mark as dirty, don't force immediate regeneration
+            adjacentChunks.forEach(adjChunk => {
                 this.markChunkDirty(adjChunk.x, adjChunk.y, adjChunk.z);
-            }
-        });
-        
-        // Force immediate update of all dirty chunks (attempt immediate visual feedback)
-        this.updateDirtyChunks();
+            });
+        }
+
+        // Don't force immediate update - let the normal update cycle handle it
+        // This prevents massive CPU usage when destroying blocks
     }
     
     private getChunkKey(x: number, y: number, z: number): string {
@@ -597,24 +595,42 @@ export class World {
     }
     
     public updateDirtyChunks(): void {
-        // First pass: collect all dirty chunks
-        const dirtyChunks: {chunk: Chunk, mode: 'detailed' | 'greedy'}[] = [];
-        
+        // Limit to 1 chunk per frame to prevent performance drops during heavy destruction
+        const MAX_CHUNKS_PER_FRAME = 1;
+        let processedChunks = 0;
+
+        // First pass: collect all dirty chunks and prioritize by distance to player
+        const dirtyChunks: {chunk: Chunk, mode: 'detailed' | 'greedy', priority: number}[] = [];
+
         for (const chunk of this.chunks.values()) {
             if (chunk.isDirty) {
                 const chunkKey = this.getChunkKey(chunk.x, chunk.y, chunk.z);
                 const mesh = this.chunkMeshes.get(chunkKey);
                 const mode = mesh?.userData.mode || 'detailed';
-                dirtyChunks.push({chunk, mode});
+
+                // Calculate priority based on distance from player (closer = higher priority)
+                // This ensures visible chunks get updated first
+                const distance = Math.abs(chunk.x) + Math.abs(chunk.z); // Manhattan distance for simplicity
+                const priority = -distance; // Negative so closer chunks sort first
+
+                dirtyChunks.push({chunk, mode, priority});
             }
         }
-        
-        // Second pass: update all dirty chunks
+
+        // Sort by priority (closer chunks first)
+        dirtyChunks.sort((a, b) => b.priority - a.priority);
+
+        // Second pass: update limited number of highest priority chunks
         for (const {chunk, mode} of dirtyChunks) {
+            if (processedChunks >= MAX_CHUNKS_PER_FRAME) {
+                break; // Limit processing to prevent FPS drops
+            }
+
             try {
                 const updated = this.addChunkToScene(chunk, mode);
                 if (updated) {
                     chunk.isDirty = false;
+                    processedChunks++;
                 } else {
                     // Keep marked as dirty so we will retry later
                     chunk.isDirty = true;

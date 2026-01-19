@@ -68,13 +68,10 @@ export class Game {
     private update(_deltaTime: number): void {
         // Update the world (this will handle chunk loading/unloading)
         this.world.update(this.player.position);
-        
-        // Force update all dirty chunks immediately
-        this.world.updateDirtyChunks();
-        
+
         // Update block highlighting and raycasting
         this.updateBlockHighlighting();
-        
+
         // Force a render update to ensure changes are visible
         this.renderer.render();
     }

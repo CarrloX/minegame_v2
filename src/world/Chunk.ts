@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { BlockType } from './BlockType';
 import { TextureAtlas } from './TextureAtlas';
 import { WorkerManager, type MeshData } from '../workers/WorkerManager';
+import { DebugManager } from '../debug/DebugManager';
 
 /**
  * Minimal interface for world objects that can be used for block queries
@@ -722,30 +723,31 @@ export class Chunk {
                 }
                 
                 // Handle index buffer with proper type (Uint16Array or Uint32Array)
-                const indexArray = this.indexCount > 0 ? 
-                    new Uint32Array(this.indexArray.buffer, 0, this.indexCount) : 
+                const indexArray = this.indexCount > 0 ?
+                    new Uint32Array(this.indexArray.buffer, 0, this.indexCount) :
                     new Uint32Array(0);
-                
-                // Check if we need 32-bit indices (more than 65535 vertices)
-                const needs32BitIndices = this.vertexCount > 65535;
-                
-                if (geometry.index) {
-                    // If the current index type doesn't match what we need, create a new one
+
+                // Check if we need 32-bit indices (more than 65535 indices)
+                const needs32BitIndices = this.indexCount > 65535;
+
+                if (geometry.index && this.indexCount > 0) {
+                    // Check if we can reuse the existing index buffer
                     const currentIs32Bit = geometry.index.array instanceof Uint32Array;
-                    
-                    if (currentIs32Bit === needs32BitIndices) {
-                        // Same type, just update the array
+                    const sizeMatches = geometry.index.count === this.indexCount;
+
+                    if (currentIs32Bit === needs32BitIndices && sizeMatches) {
+                        // Same type and size, just update the array
                         geometry.index.copyArray(indexArray);
                         geometry.index.needsUpdate = true;
                     } else {
-                        // Need to create a new index buffer with the correct type
+                        // Size or type doesn't match, create new index buffer
                         geometry.setIndex(null); // Remove existing index
                         if (needs32BitIndices) {
                             geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(indexArray), 1, false));
                         } else {
                             // Convert to Uint16Array if possible
-                            if (this.vertexCount > 65535) {
-                                console.warn('Chunk has too many vertices for 16-bit indices, but trying to use them anyway');
+                            if (this.indexCount > 65535) {
+                                console.warn('Chunk has too many indices for 16-bit indices, but trying to use them anyway');
                             }
                             geometry.setIndex(new THREE.BufferAttribute(new Uint16Array(indexArray), 1, false));
                         }
@@ -757,6 +759,9 @@ export class Chunk {
                     } else {
                         geometry.setIndex(new THREE.BufferAttribute(new Uint16Array(indexArray), 1, false));
                     }
+                } else {
+                    // No indices, remove existing index buffer
+                    geometry.setIndex(null);
                 }
                 
                 geometry.computeBoundingSphere();
@@ -777,7 +782,7 @@ export class Chunk {
             const uvArray = new Float32Array(this.uvArray.buffer, 0, this.vertexCount * 2);
             
             // Create index array with appropriate type (Uint16Array or Uint32Array)
-            const needs32BitIndices = this.vertexCount > 65535;
+            const needs32BitIndices = this.indexCount > 65535;
             const indexArray = this.indexCount > 0 ? 
                 new Uint32Array(this.indexArray.buffer, 0, this.indexCount) : 
                 new Uint32Array(0);
@@ -793,8 +798,8 @@ export class Chunk {
                     geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(indexArray), 1, false));
                 } else {
                     // Convert to Uint16Array if possible
-                    if (this.vertexCount > 65535) {
-                        console.warn('Chunk has too many vertices for 16-bit indices, but trying to use them anyway');
+                    if (this.indexCount > 65535) {
+                        console.warn('Chunk has too many indices for 16-bit indices, but trying to use them anyway');
                     }
                     geometry.setIndex(new THREE.BufferAttribute(new Uint16Array(indexArray), 1, false));
                 }
@@ -883,6 +888,9 @@ export class Chunk {
             );
         }
         
+        // Log mesh regeneration for profiling
+        console.log(`[Mesh Generated] Chunk (${this.x},${this.y},${this.z}) ${mode}: ${this.vertexCount} verts, ${this.indexCount} indices`);
+
         // Marcar como actualizado
         this.isDirty = false;
     }
